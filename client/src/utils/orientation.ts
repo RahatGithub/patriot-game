@@ -21,7 +21,7 @@ export function setupOrientationEnforcement() {
 
   // Try to lock orientation (only works in fullscreen on most browsers)
   try {
-    screen.orientation?.lock?.("landscape").catch(() => {});
+    (screen.orientation as any)?.lock?.("landscape").catch(() => {});
   } catch {
     // Not supported — the rotate warning is sufficient
   }

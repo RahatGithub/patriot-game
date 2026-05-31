@@ -3,7 +3,10 @@ import { CreateRoomScreen } from "./screens/CreateRoomScreen.js";
 import { JoinRoomScreen } from "./screens/JoinRoomScreen.js";
 import { LobbyScreen } from "./screens/LobbyScreen.js";
 import { MatchStartingScreen } from "./screens/MatchStartingScreen.js";
+import { DeviceSelectScreen } from "./screens/DeviceSelectScreen.js";
 import type { NetworkManager } from "../network/NetworkManager.js";
+import type { DeviceProfile } from "../utils/deviceProfile.js";
+import type Phaser from "phaser";
 
 export interface ScreenContext {
   screens: ScreenManager;
@@ -20,6 +23,11 @@ export class ScreenManager {
   private currentScreen: Screen | null = null;
   private currentName = "";
   public network!: NetworkManager;
+  public game!: Phaser.Game;
+  public deviceProfile!: DeviceProfile;
+
+  /** Stored for post-device-select routing */
+  private pendingRoomCode: string | null = null;
 
   constructor(overlay: HTMLElement) {
     this.overlay = overlay;
@@ -47,6 +55,21 @@ export class ScreenManager {
     return this.currentName;
   }
 
+  /** Called after device selection to navigate to the appropriate first screen */
+  showPostDevice() {
+    if (this.pendingRoomCode) {
+      const code = this.pendingRoomCode;
+      this.pendingRoomCode = null;
+      this.show("joinRoom", { code });
+    } else {
+      this.show("splash");
+    }
+  }
+
+  setPendingRoomCode(code: string) {
+    this.pendingRoomCode = code;
+  }
+
   private createScreen(name: string): Screen {
     switch (name) {
       case "splash":
@@ -59,6 +82,8 @@ export class ScreenManager {
         return new LobbyScreen();
       case "matchStarting":
         return new MatchStartingScreen();
+      case "deviceSelect":
+        return new DeviceSelectScreen();
       default:
         throw new Error(`Unknown screen: ${name}`);
     }

@@ -40,7 +40,7 @@ export class LobbyScreen implements Screen {
     const shareEl = el.querySelector("#share-link")!;
     const playerListEl = el.querySelector("#player-list")!;
     const countEl = el.querySelector("#player-count")!;
-    const statusEl = el.querySelector("#status-text")!;
+    const statusEl = el.querySelector("#status-text") as HTMLElement;
     const startBtn = el.querySelector("#btn-start") as HTMLButtonElement;
     const leaveBtn = el.querySelector("#btn-leave")!;
     const copyBtn = el.querySelector("#btn-copy")!;
