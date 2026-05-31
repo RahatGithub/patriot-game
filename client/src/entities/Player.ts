@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import type { PlayerRank } from "@patriot/shared";
-import { RANK_STARS, PLAYER_RADIUS, INTERPOLATION_DELAY_MS } from "@patriot/shared";
+import { RANK_STARS, PLAYER_RADIUS, INTERPOLATION_DELAY_MS, RANKS, RANK_TINTS } from "@patriot/shared";
+import type { RankId } from "@patriot/shared";
 
 const HP_BAR_W = 50;
 const HP_BAR_H = 6;
@@ -123,8 +124,29 @@ export class Player {
 
   setRank(rank: PlayerRank) {
     this.rank = rank;
-    const stars = "\u2605".repeat(RANK_STARS[rank]);
+    const rankDef = RANKS.find((r) => r.id === rank);
+    if (!rankDef) return;
+
+    // Update star display
+    const stars = "\u2605".repeat(rankDef.stars);
     this.nameLabel.setText(`${this.name} ${stars}`);
+
+    // Sprite swap (with fallback)
+    if (!this.usingPlaceholder) {
+      let spriteKey = rankDef.spriteKey;
+      if (!this.scene.textures.exists(spriteKey)) {
+        spriteKey = "soldier_patriot";
+      }
+      (this.sprite as Phaser.Physics.Arcade.Sprite).setTexture(spriteKey);
+    }
+
+    // Rank tint
+    const tint = RANK_TINTS[rank as RankId];
+    if (tint && !this.isDowned) {
+      (this.sprite as any).setTint?.(tint);
+    } else if (!tint && !this.isDowned) {
+      (this.sprite as any).clearTint?.();
+    }
   }
 
   /** Apply downed visual state */

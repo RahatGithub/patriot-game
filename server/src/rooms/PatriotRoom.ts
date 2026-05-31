@@ -21,6 +21,7 @@ import {
   PICKUP_INTERACT_RANGE,
   PLAYER_MAX_HP,
   MAX_GRENADES,
+  getRankForKills,
 } from "@patriot/shared";
 import type { InputCommand, WeaponId, DamageSource, MatchResult } from "@patriot/shared";
 import { RoomStateSchema } from "./schema/RoomStateSchema.js";
@@ -611,7 +612,10 @@ export class PatriotRoom extends Room<RoomStateSchema> {
       this.state.totalAIKilled++;
       this.broadcast("aiKilled", { aiId, killerId: bullet.ownerId, x: ai.x, y: ai.y });
       const killer = this.state.players.get(bullet.ownerId);
-      if (killer) killer.kills++;
+      if (killer) {
+        killer.kills++;
+        this.checkPromotion(killer, bullet.ownerId);
+      }
       console.log(`[Room ${this.state.code}] Mafia killed by ${killer?.name || bullet.ownerId}`);
     }
   }
@@ -644,12 +648,29 @@ export class PatriotRoom extends Room<RoomStateSchema> {
       target.downedBy = bullet.ownerId;
 
       const killer = this.state.players.get(bullet.ownerId);
-      if (killer) killer.kills++;
+      if (killer) {
+        killer.kills++;
+        this.checkPromotion(killer, bullet.ownerId);
+      }
 
       this.broadcast("playerDowned", {
         victimId: targetId,
         killerId: bullet.ownerId,
       });
+    }
+  }
+
+  private checkPromotion(player: PlayerSchema, sessionId: string) {
+    const newRankDef = getRankForKills(player.kills);
+    if (newRankDef.id !== player.rank) {
+      player.rank = newRankDef.id;
+      this.broadcast("playerPromoted", {
+        playerId: sessionId,
+        newRankId: newRankDef.id,
+        newRankName: newRankDef.name,
+        kills: player.kills,
+      });
+      console.log(`[Room ${this.state.code}] ${player.name} promoted to ${newRankDef.name}`);
     }
   }
 

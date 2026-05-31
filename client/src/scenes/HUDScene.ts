@@ -1,5 +1,6 @@
 import Phaser from "phaser";
-import { PATRIOT_MAP } from "@patriot/shared";
+import { PATRIOT_MAP, getRankForKills, getNextRank, RANKS } from "@patriot/shared";
+import type { RankId } from "@patriot/shared";
 
 const MINIMAP_W = 160;
 const MINIMAP_H = 120; // 4:3 ratio matching 4000x3000 map
@@ -13,6 +14,7 @@ export class HUDScene extends Phaser.Scene {
   private minimapGfx!: Phaser.GameObjects.Graphics;
   private timerText!: Phaser.GameObjects.Text;
   private grenadeText!: Phaser.GameObjects.Text;
+  private killsText!: Phaser.GameObjects.Text;
   private timerPulsePhase = 0;
 
   constructor() {
@@ -74,8 +76,8 @@ export class HUDScene extends Phaser.Scene {
         color: "#daa520",
       })
       .setOrigin(1, 0);
-    this.add
-      .text(W - 30, H - 35, "0 / 10 kills", {
+    this.killsText = this.add
+      .text(W - 30, H - 35, "0 / 10 kills to Officer", {
         fontSize: "12px",
         color: "#888",
       })
@@ -135,6 +137,19 @@ export class HUDScene extends Phaser.Scene {
 
             const gc = me.grenadeCount ?? 0;
             this.grenadeText.setText(gc > 0 ? `\uD83D\uDCA3\u00D7${gc}` : "");
+
+            // Rank + kills progress
+            const kills = me.kills ?? 0;
+            const rankId = (me.rank || "soldier") as RankId;
+            const rankDef = getRankForKills(kills);
+            const stars = "\u2605".repeat(rankDef.stars);
+            this.rankText.setText(`${rankDef.name.toUpperCase()} ${stars}`);
+            const next = getNextRank(rankId);
+            if (next) {
+              this.killsText.setText(`${kills} / ${next.killThreshold} kills to ${next.name}`);
+            } else {
+              this.killsText.setText(`MAX RANK ${stars}`);
+            }
           }
 
           // Mini-map update

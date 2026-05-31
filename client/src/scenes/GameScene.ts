@@ -81,7 +81,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   preload() {
-    this.load.image("soldier_patriot", "/assets/sprites/characters/soldier_patriot.png");
+    const rankSprites = ["soldier_patriot", "officer_patriot", "major_patriot", "general_patriot", "marshal_patriot"];
+    for (const key of rankSprites) {
+      this.load.image(key, `/assets/sprites/characters/${key}.png`);
+    }
     this.load.image("mafia_mk18", "/assets/sprites/characters/mafia_mk18.png");
     this.load.image("mafia_pistol", "/assets/sprites/characters/mafia_pistol.png");
     this.load.image("mafia_mg", "/assets/sprites/characters/mafia_mg.png");
@@ -345,6 +348,7 @@ export class GameScene extends Phaser.Scene {
               this.localPlayerWasDead = false;
             }
             this.localPlayer.setHp(p.hp);
+            this.localPlayer.setRank(p.rank);
             if (p.isDowned && !this.localPlayer.isDowned) this.localPlayer.setDowned(true);
             if (p.isDead) {
               this.localPlayer.setDead(true);
@@ -360,6 +364,7 @@ export class GameScene extends Phaser.Scene {
             }
             remote.pushSnapshot(p.x, p.y, p.aimAngle);
             remote.setHp(p.hp);
+            remote.setRank(p.rank);
             if (p.isDowned && !remote.isDowned) remote.setDowned(true);
             if (p.isDead) remote.setDead(true);
           }
@@ -649,6 +654,20 @@ export class GameScene extends Phaser.Scene {
       } else if (playerId === this.sessionId) {
         const name = weaponId.charAt(0).toUpperCase() + weaponId.slice(1);
         this.showWeaponNotification(`Equipped ${name}`);
+      }
+    });
+
+    // Player promoted event
+    room.onMessage("playerPromoted", (data: any) => {
+      const { playerId, newRankName } = data;
+      if (playerId === this.sessionId) {
+        this.showPromotionNotification(newRankName);
+      } else {
+        // Teammate promoted — find their name
+        const remote = this.remotePlayers.get(playerId);
+        const pState = (room.state as any).players?.get(playerId);
+        const name = pState?.name || "Teammate";
+        this.showTeammatePromotion(name, newRankName);
       }
     });
 
@@ -1185,5 +1204,52 @@ export class GameScene extends Phaser.Scene {
       duration: 500,
       onComplete: () => this.waveNotification?.setVisible(false),
     });
+  }
+
+  private showPromotionNotification(rankName: string) {
+    if (!this.captureNotification) return;
+    const cam = this.cameras.main;
+    this.captureNotification
+      .setText(`PROMOTED TO ${rankName.toUpperCase()}!`)
+      .setColor("#ffd700")
+      .setPosition(cam.width / 2, cam.height / 2 - 60)
+      .setAlpha(1)
+      .setVisible(true);
+
+    this.cameras.main.flash(400, 255, 215, 0);
+
+    this.tweens.add({
+      targets: this.captureNotification,
+      alpha: 0,
+      delay: 2500,
+      duration: 500,
+      onComplete: () => {
+        this.captureNotification?.setVisible(false);
+        this.captureNotification?.setColor("#00ff00");
+      },
+    });
+  }
+
+  private showTeammatePromotion(name: string, rankName: string) {
+    // Small top-right notification
+    const existing = document.getElementById("teammate-promo");
+    if (existing) existing.remove();
+
+    const el = document.createElement("div");
+    el.id = "teammate-promo";
+    el.style.cssText = `
+      position:fixed; top:100px; right:20px;
+      background:rgba(0,0,0,0.8); border:1px solid #ffd700; border-radius:6px;
+      padding:8px 14px; color:#ffd700; font-family:monospace; font-size:13px;
+      z-index:1000;
+    `;
+    el.textContent = `${name} promoted to ${rankName}!`;
+    document.body.appendChild(el);
+
+    setTimeout(() => {
+      el.style.transition = "opacity 0.5s";
+      el.style.opacity = "0";
+      setTimeout(() => el.remove(), 500);
+    }, 2000);
   }
 }
