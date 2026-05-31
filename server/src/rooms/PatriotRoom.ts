@@ -34,6 +34,7 @@ import {
   BARREL_CARRY_OFFSET_Y,
   GRENADE_AOE_RADIUS,
   GRENADE_COOLDOWN_MS,
+  BAZOOKA_AOE_RADIUS,
 } from "@patriot/shared";
 import type { RankId } from "@patriot/shared";
 import type { InputCommand, WeaponId, DamageSource, MatchResult } from "@patriot/shared";
@@ -103,7 +104,9 @@ export class PatriotRoom extends Room<RoomStateSchema> {
       const cooldown = 1000 / wep.fireRatePerSec;
       if (now - player.lastFireTimestamp < cooldown) return;
 
-      // TODO: enforce ammo limits in Prompt 19 (treating as unlimited for v1.0)
+      // Ammo enforcement for limited-ammo weapons (bazooka)
+      if (wep.ammo !== "unlimited" && player.ammo <= 0) return;
+      if (wep.ammo !== "unlimited") player.ammo--;
 
       // Spawn bullet
       const spreadAngle = data.aimAngle + (Math.random() - 0.5) * wep.spread;
@@ -215,6 +218,16 @@ export class PatriotRoom extends Room<RoomStateSchema> {
       this.spawnGrenade(player, client.sessionId);
     });
 
+    // Drop weapon handler (F key) — revert to pistol
+    this.onMessage("dropWeapon", (client) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player || player.isDowned || player.isDead) return;
+      if (player.currentWeapon === "pistol") return;
+      player.currentWeapon = "pistol";
+      player.ammo = 30;
+      this.broadcast("weaponDropped", { playerId: player.id });
+    });
+
     // Ping handler
     this.onMessage("ping", (client, data: { t: number }) => {
       client.send("pong", { t: data.t });
@@ -319,6 +332,7 @@ export class PatriotRoom extends Room<RoomStateSchema> {
 
       const wep = WEAPONS[bullet.weaponId as WeaponId];
       const isGrenade = bullet.weaponId === "grenade";
+      const isRocket = bullet.weaponId === "bazooka";
       const expired = now - bullet.spawnedAt > (wep?.bulletLifetimeMs ?? 1000);
       const oob = bullet.x < 0 || bullet.x > PATRIOT_MAP.width || bullet.y < 0 || bullet.y > PATRIOT_MAP.height;
       const hitWall = checkWallCollision(bullet.x, bullet.y, wep?.bulletRadius ?? 4);
@@ -327,6 +341,50 @@ export class PatriotRoom extends Room<RoomStateSchema> {
       if (isGrenade) {
         if (expired || hitWall || oob) {
           this.detonateGrenade(bullet);
+          toRemove.push(id);
+        }
+        return;
+      }
+
+      // Rockets detonate on wall/OOB/expiry OR on first entity impact
+      if (isRocket) {
+        if (hitWall || expired || oob) {
+          this.detonateRocket(bullet);
+          toRemove.push(id);
+          return;
+        }
+
+        let rocketHit = false;
+        const rocketR = WEAPONS.bazooka.bulletRadius;
+
+        // Check player impact
+        this.state.players.forEach((p) => {
+          if (rocketHit || p.isDead || p.isDowned) return;
+          if (p.id === bullet.ownerId) return;
+          const dx = bullet.x - p.x, dy = bullet.y - p.y;
+          if (dx * dx + dy * dy < (PLAYER_HITBOX_RADIUS + rocketR) ** 2) rocketHit = true;
+        });
+
+        // Check AI impact
+        if (!rocketHit) {
+          this.state.ai.forEach((ai) => {
+            if (rocketHit || ai.isDead) return;
+            const dx = bullet.x - ai.x, dy = bullet.y - ai.y;
+            if (dx * dx + dy * dy < (AI_RADIUS + rocketR) ** 2) rocketHit = true;
+          });
+        }
+
+        // Check barrel impact
+        if (!rocketHit) {
+          this.state.barrels.forEach((b) => {
+            if (rocketHit || b.exploded) return;
+            const dx = bullet.x - b.x, dy = bullet.y - b.y;
+            if (dx * dx + dy * dy < (BARREL_HITBOX_RADIUS + rocketR) ** 2) rocketHit = true;
+          });
+        }
+
+        if (rocketHit) {
+          this.detonateRocket(bullet);
           toRemove.push(id);
         }
         return;
@@ -638,6 +696,27 @@ export class PatriotRoom extends Room<RoomStateSchema> {
     this.aiManager.broadcastSound(grenade.x, grenade.y, "explosion", BARREL_EXPLOSION_RADIUS * 2);
   }
 
+  private detonateRocket(rocket: BulletSchema) {
+    this.broadcast("explosion", {
+      x: rocket.x,
+      y: rocket.y,
+      radius: BAZOOKA_AOE_RADIUS,
+      source: "bazooka_rocket",
+    });
+
+    applyAoE(this, {
+      source: "bazooka_rocket",
+      x: rocket.x,
+      y: rocket.y,
+      radius: BAZOOKA_AOE_RADIUS,
+      attackerId: rocket.ownerId,
+      attackerFaction: this.attackerFactionOf(rocket.ownerId),
+      ignoreFriendlyFire: false,
+    });
+
+    this.aiManager.broadcastSound(rocket.x, rocket.y, "explosion", 1000);
+  }
+
   private pickupBarrel(player: PlayerSchema, sessionId: string, barrel: BarrelSchema) {
     barrel.carriedBy = sessionId;
     player.carriedBarrelId = barrel.id;
@@ -801,7 +880,7 @@ export class PatriotRoom extends Room<RoomStateSchema> {
         } else {
           player.currentWeapon = weaponId;
           const def = WEAPONS[weaponId];
-          if (def.ammo !== "unlimited") player.ammo = def.ammo as number;
+          if (def.ammo !== "unlimited") player.ammo = def.ammo as number; // Set or refill ammo
         }
         this.state.pickups.delete(pickupId);
         this.broadcast("weaponPicked", { playerId: player.id, weaponId });

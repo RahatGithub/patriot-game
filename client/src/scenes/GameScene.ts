@@ -988,6 +988,17 @@ export class GameScene extends Phaser.Scene {
       if (im.grenadePressed && room) {
         room.send("throwGrenade");
       }
+
+      // Drop weapon (F key) — revert to pistol
+      if (im.dropPressed && room) {
+        room.send("dropWeapon");
+      }
+
+      // Bazooka fire feedback — heavy screen shake + flash
+      if (shouldFire && curWeapon === "bazooka" && Date.now() - this.lastFireTime < 100) {
+        this.cameras.main.shake(150, 0.008);
+        this.cameras.main.flash(80, 200, 100, 50);
+      }
     }
 
     // Update all players

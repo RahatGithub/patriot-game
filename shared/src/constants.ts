@@ -49,3 +49,4 @@ export const BARREL_CARRY_OFFSET_Y = -30;
 export const BARREL_PICKUP_RANGE = 50;
 export const GRENADE_AOE_RADIUS = 150;
 export const GRENADE_COOLDOWN_MS = 500;
+export const BAZOOKA_AOE_RADIUS = 150;
