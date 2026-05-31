@@ -7,6 +7,9 @@ import {
   AI_VISION_ARC,
   AI_VISION_ALERT_RANGE_MULT,
   AI_VISION_TICK_INTERVAL,
+  AI_SOUND_RANGE,
+  AI_ALERT_DURATION_MS,
+  AI_ALERT_TURN_SPEED,
 } from "@patriot/shared";
 import { AISchema } from "../rooms/schema/AISchema.js";
 import type { PlayerSchema } from "../rooms/schema/PlayerSchema.js";
@@ -15,6 +18,14 @@ import { segmentIntersectsRect } from "../systems/geometry.js";
 import type { RoomStateSchema } from "../rooms/schema/RoomStateSchema.js";
 
 let aiIdCounter = 0;
+
+function lerpAngle(from: number, to: number, maxStep: number): number {
+  let diff = to - from;
+  while (diff > Math.PI) diff -= 2 * Math.PI;
+  while (diff < -Math.PI) diff += 2 * Math.PI;
+  const step = Math.sign(diff) * Math.min(Math.abs(diff), maxStep);
+  return from + step;
+}
 
 export class AIManager {
   private state: RoomStateSchema;
@@ -45,6 +56,19 @@ export class AIManager {
     }
   }
 
+  /** Called when a gunshot occurs — alert nearby AI */
+  broadcastSound(x: number, y: number) {
+    this.state.ai.forEach((ai) => {
+      if (ai.isDead) return;
+      if (ai.behaviorState === "chase") return; // chasing AI ignores noise
+
+      const dist = Math.hypot(x - ai.x, y - ai.y);
+      if (dist <= AI_SOUND_RANGE) {
+        this.enterAlertState(ai, x, y);
+      }
+    });
+  }
+
   update(deltaTime: number) {
     const now = Date.now();
     const toRemove: string[] = [];
@@ -67,7 +91,10 @@ export class AIManager {
         case "patrol":
           this.updatePatrol(ai, deltaTime);
           break;
-        // alert, chase — Prompts 14-15
+        case "alert":
+          this.updateAlert(ai, deltaTime);
+          break;
+        // chase — Prompt 15
       }
     });
 
@@ -76,16 +103,72 @@ export class AIManager {
     }
   }
 
-  checkSight(ai: AISchema): PlayerSchema | null {
+  private checkSight(ai: AISchema): PlayerSchema | null {
     const spotted = this.findVisiblePlayer(ai);
     if (spotted) {
-      // For this prompt: log only — behavior change in Prompt 14
-      console.log(
-        `[Room ${this.roomCode}] Mafia ${ai.id} spotted player ${spotted.name}`
-      );
+      this.enterAlertState(ai, spotted.x, spotted.y, spotted.id);
       return spotted;
     }
     return null;
+  }
+
+  private enterAlertState(ai: AISchema, x: number, y: number, targetId = "") {
+    const wasPatrol = ai.behaviorState === "patrol";
+    ai.behaviorState = "alert";
+    ai.alertStartedAt = Date.now();
+    ai.targetX = x;
+    ai.targetY = y;
+    if (targetId) ai.alertTargetId = targetId;
+
+    if (wasPatrol) {
+      console.log(`[Room ${this.roomCode}] Mafia ${ai.id} alerted`);
+    }
+  }
+
+  private updateAlert(ai: AISchema, dt: number) {
+    // Face the stimulus
+    const dx = ai.targetX - ai.x;
+    const dy = ai.targetY - ai.y;
+    const desired = Math.atan2(dy, dx);
+    ai.aimAngle = lerpAngle(ai.aimAngle, desired, AI_ALERT_TURN_SPEED * (dt / 1000));
+
+    // Check sight (with extended range from alert state)
+    const spotted = this.findVisiblePlayer(ai);
+    if (spotted) {
+      ai.targetX = spotted.x;
+      ai.targetY = spotted.y;
+      ai.alertTargetId = spotted.id;
+      ai.alertStartedAt = Date.now();
+      // Prompt 15 will transition to chase here
+      return;
+    }
+
+    // Timer expired → return to patrol
+    if (Date.now() - ai.alertStartedAt > AI_ALERT_DURATION_MS) {
+      this.returnToPatrol(ai);
+    }
+  }
+
+  private returnToPatrol(ai: AISchema) {
+    ai.behaviorState = "patrol";
+    ai.alertTargetId = "";
+
+    // Find nearest waypoint
+    const path = PATRIOT_MAP.patrolPaths.find((p) => p.id === ai.patrolPathId);
+    if (path) {
+      let nearestIdx = 0;
+      let nearestDist = Infinity;
+      path.waypoints.forEach((wp, i) => {
+        const d = Math.hypot(wp.x - ai.x, wp.y - ai.y);
+        if (d < nearestDist) {
+          nearestDist = d;
+          nearestIdx = i;
+        }
+      });
+      ai.currentWaypointIdx = nearestIdx;
+    }
+
+    console.log(`[Room ${this.roomCode}] Mafia ${ai.id} returned to patrol`);
   }
 
   findVisiblePlayer(ai: AISchema): PlayerSchema | null {
@@ -104,14 +187,12 @@ export class AIManager {
       const dist = Math.sqrt(dx * dx + dy * dy);
       if (dist > range) return;
 
-      // Angle check
       const angleToPlayer = Math.atan2(dy, dx);
       let diff = angleToPlayer - ai.aimAngle;
       while (diff > Math.PI) diff -= 2 * Math.PI;
       while (diff < -Math.PI) diff += 2 * Math.PI;
       if (Math.abs(diff) > halfArc) return;
 
-      // Line-of-sight
       if (!this.hasLineOfSight(ai.x, ai.y, player.x, player.y)) return;
 
       if (dist < closestDist) {
@@ -125,9 +206,7 @@ export class AIManager {
 
   hasLineOfSight(x1: number, y1: number, x2: number, y2: number): boolean {
     for (const wall of PATRIOT_MAP.walls) {
-      if (segmentIntersectsRect(x1, y1, x2, y2, wall)) {
-        return false;
-      }
+      if (segmentIntersectsRect(x1, y1, x2, y2, wall)) return false;
     }
     return true;
   }
@@ -145,8 +224,7 @@ export class AIManager {
 
     if (dist < 5) {
       if (path.loop) {
-        ai.currentWaypointIdx =
-          (ai.currentWaypointIdx + 1) % path.waypoints.length;
+        ai.currentWaypointIdx = (ai.currentWaypointIdx + 1) % path.waypoints.length;
       } else {
         ai.currentWaypointIdx += ai.patrolDirection;
         if (ai.currentWaypointIdx >= path.waypoints.length) {
@@ -169,8 +247,7 @@ export class AIManager {
       ai.y = ny;
     } else {
       if (path.loop) {
-        ai.currentWaypointIdx =
-          (ai.currentWaypointIdx + 1) % path.waypoints.length;
+        ai.currentWaypointIdx = (ai.currentWaypointIdx + 1) % path.waypoints.length;
       } else {
         ai.currentWaypointIdx += ai.patrolDirection;
       }

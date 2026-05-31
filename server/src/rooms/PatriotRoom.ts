@@ -94,6 +94,9 @@ export class PatriotRoom extends Room<RoomStateSchema> {
 
       this.state.bullets.set(bullet.id, bullet);
       player.lastFireTimestamp = now;
+
+      // Alert nearby AI via sound
+      this.aiManager.broadcastSound(player.x, player.y);
     });
 
     // Debug weapon switch (dev only)

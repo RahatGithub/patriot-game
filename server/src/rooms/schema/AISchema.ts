@@ -17,4 +17,8 @@ export class AISchema extends Schema {
   @type("number") deathTime: number = 0;
   @type("number") visionRange: number = AI_VISION_RANGE;
   @type("number") visionArc: number = AI_VISION_ARC;
+  @type("number") alertStartedAt: number = 0;
+  @type("number") targetX: number = 0;
+  @type("number") targetY: number = 0;
+  @type("string") alertTargetId: string = "";
 }

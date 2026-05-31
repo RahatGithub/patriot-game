@@ -19,3 +19,6 @@ export const AI_VISION_RANGE = 250;
 export const AI_VISION_ARC = Math.PI / 2;
 export const AI_VISION_ALERT_RANGE_MULT = 1.3;
 export const AI_VISION_TICK_INTERVAL = 100;
+export const AI_SOUND_RANGE = 400;
+export const AI_ALERT_DURATION_MS = 5000;
+export const AI_ALERT_TURN_SPEED = 4;
