@@ -81,17 +81,33 @@ export class HUDScene extends Phaser.Scene {
       })
       .setOrigin(1, 1);
 
-    // Update ping from GameScene's network manager
+    // Periodic HUD update from game state
     this.time.addEvent({
-      delay: 1000,
+      delay: 200,
       loop: true,
       callback: () => {
         const gameScene = this.scene.get("GameScene") as any;
         const nm = gameScene?.networkManager;
-        if (nm) {
-          const p = nm.ping;
-          pingText.setText(`Ping: ${p}ms`);
-          pingText.setColor(p < 80 ? "#4caf50" : p < 150 ? "#ddaa00" : "#cc2222");
+        if (!nm) return;
+
+        // Ping
+        const p = nm.ping;
+        pingText.setText(`Ping: ${p}ms`);
+        pingText.setColor(p < 80 ? "#4caf50" : p < 150 ? "#ddaa00" : "#cc2222");
+
+        // Weapon + HP from player state
+        const room = nm.getRoom();
+        if (room) {
+          const me = (room.state as any).players?.get(room.sessionId);
+          if (me) {
+            const hp = me.hp ?? 100;
+            this.hpText.setText(`HP: ${hp}/100`);
+            this.hpText.setColor(hp > 30 ? "#4caf50" : "#cc2222");
+
+            const wepName = me.currentWeapon === "pistol" ? "Pistol" : me.currentWeapon === "mk18" ? "MK18" : me.currentWeapon;
+            const ammoStr = me.currentWeapon === "pistol" ? "30/\u221e" : "\u221e";
+            this.weaponText.setText(`${wepName}  ${ammoStr}`);
+          }
         }
       },
     });

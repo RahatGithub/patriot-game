@@ -91,6 +91,15 @@ export class PatriotRoom extends Room<RoomStateSchema> {
       player.lastFireTimestamp = now;
     });
 
+    // Debug weapon switch (dev only)
+    this.onMessage("debugSetWeapon", (client, msg: { weaponId: string }) => {
+      if (process.env.NODE_ENV === "production") return;
+      const player = this.state.players.get(client.sessionId);
+      if (player && WEAPONS[msg.weaponId as WeaponId]) {
+        player.currentWeapon = msg.weaponId;
+      }
+    });
+
     // Ping handler
     this.onMessage("ping", (client, data: { t: number }) => {
       client.send("pong", { t: data.t });

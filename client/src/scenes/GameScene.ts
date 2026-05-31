@@ -174,6 +174,17 @@ export class GameScene extends Phaser.Scene {
       }
     });
 
+    // F6 — debug weapon switch (dev only, removed in Prompt 21)
+    const f6Key = kb.addKey(Phaser.Input.Keyboard.KeyCodes.F6);
+    kb.addCapture([Phaser.Input.Keyboard.KeyCodes.F6]);
+    const debugWeapons: WeaponId[] = ["pistol", "mk18"];
+    let debugWepIdx = 0;
+    f6Key.on("down", () => {
+      debugWepIdx = (debugWepIdx + 1) % debugWeapons.length;
+      const newWep = debugWeapons[debugWepIdx];
+      this.networkManager?.getRoom()?.send("debugSetWeapon", { weaponId: newWep });
+    });
+
     if (getDebugFlag("input")) {
       this.debugOverlay = new InputDebugOverlay(this.inputManager);
     }
@@ -459,16 +470,17 @@ export class GameScene extends Phaser.Scene {
         im.fireHeld
       );
 
-      // Fire weapon
-      if (im.firePressed) {
+      // Fire weapon — semi fires on press, auto fires on hold
+      const room = this.networkManager.getRoom();
+      const curWeapon = (room?.state as any)?.players?.get(this.sessionId)?.currentWeapon || "pistol";
+      const wep = WEAPONS[curWeapon as WeaponId] ?? WEAPONS.pistol;
+      const shouldFire = wep.fireMode === "auto" ? im.fireHeld : im.firePressed;
+      if (shouldFire) {
         const now = Date.now();
-        const wep = WEAPONS["pistol" as WeaponId];
         const cooldown = 1000 / wep.fireRatePerSec;
         if (now - this.lastFireTime >= cooldown) {
           this.lastFireTime = now;
-          const room = this.networkManager.getRoom();
           room?.send("fire", { aimAngle: angle });
-          // Predicted muzzle flash
           const fx = this.localPlayer.sprite.x + Math.cos(angle) * 35;
           const fy = this.localPlayer.sprite.y + Math.sin(angle) * 35;
           new MuzzleFlash(this, fx, fy);

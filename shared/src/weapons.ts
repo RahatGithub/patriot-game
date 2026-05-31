@@ -5,6 +5,7 @@ export type WeaponId = "pistol" | "mk18" | "mg" | "bazooka" | "grenade";
 export interface WeaponDef {
   id: WeaponId;
   name: string;
+  fireMode: "semi" | "auto";
   fireRatePerSec: number;
   bulletSpeed: number;
   bulletLifetimeMs: number;
@@ -21,6 +22,7 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
   pistol: {
     id: "pistol",
     name: "Pistol",
+    fireMode: "semi",
     fireRatePerSec: 3,
     bulletSpeed: 900,
     bulletLifetimeMs: 1000,
@@ -35,6 +37,7 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
   mk18: {
     id: "mk18",
     name: "MK18",
+    fireMode: "auto",
     fireRatePerSec: 8,
     bulletSpeed: 1200,
     bulletLifetimeMs: 1200,
@@ -49,6 +52,7 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
   mg: {
     id: "mg",
     name: "Machine Gun",
+    fireMode: "auto",
     fireRatePerSec: 12,
     bulletSpeed: 1100,
     bulletLifetimeMs: 1200,
@@ -63,6 +67,7 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
   bazooka: {
     id: "bazooka",
     name: "Bazooka",
+    fireMode: "semi",
     fireRatePerSec: 0.5,
     bulletSpeed: 600,
     bulletLifetimeMs: 2000,
@@ -77,6 +82,7 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
   grenade: {
     id: "grenade",
     name: "Grenade",
+    fireMode: "semi",
     fireRatePerSec: 1,
     bulletSpeed: 400,
     bulletLifetimeMs: 1500,
