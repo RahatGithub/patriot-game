@@ -10,6 +10,18 @@ import { getRoomIdByCode } from "./utils/roomRegistry.js";
 const app = express();
 app.use(express.json());
 
+// CORS for client access
+app.use((_req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type");
+  if (_req.method === "OPTIONS") {
+    res.sendStatus(200);
+    return;
+  }
+  next();
+});
+
 // Room code lookup endpoint
 app.get("/room/:code", (req, res) => {
   const code = req.params.code.toUpperCase();
