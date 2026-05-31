@@ -976,6 +976,11 @@ export class GameScene extends Phaser.Scene {
           const fx = this.localPlayer.sprite.x + Math.cos(angle) * 35;
           const fy = this.localPlayer.sprite.y + Math.sin(angle) * 35;
           new MuzzleFlash(this, fx, fy);
+
+          // MG: subtle camera shake for heavy weapon feel
+          if (curWeapon === "mg") {
+            this.cameras.main.shake(50, 0.001);
+          }
         }
       }
 
