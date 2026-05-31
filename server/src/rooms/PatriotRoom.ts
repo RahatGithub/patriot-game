@@ -9,10 +9,12 @@ import {
   ClientMessage,
   ServerMessage,
   PATRIOT_MAP,
+  WEAPONS,
 } from "@patriot/shared";
-import type { InputCommand } from "@patriot/shared";
+import type { InputCommand, WeaponId } from "@patriot/shared";
 import { RoomStateSchema } from "./schema/RoomStateSchema.js";
 import { PlayerSchema } from "./schema/PlayerSchema.js";
+import { BulletSchema } from "./schema/BulletSchema.js";
 import { generateRoomCode } from "../utils/roomCode.js";
 import { registerRoom, unregisterRoom } from "../utils/roomRegistry.js";
 import { checkWallCollision, clampToMap } from "../systems/collision.js";
@@ -20,6 +22,7 @@ import { checkWallCollision, clampToMap } from "../systems/collision.js";
 export class PatriotRoom extends Room<RoomStateSchema> {
   maxClients = MAX_PLAYERS_PER_ROOM;
   private playerInputs = new Map<string, InputCommand[]>();
+  private bulletIdCounter = 0;
 
   onCreate(options: any) {
     const checkpointCount = VALID_CHECKPOINT_COUNTS.includes(options.checkpointCount)
@@ -48,6 +51,40 @@ export class PatriotRoom extends Room<RoomStateSchema> {
           buf.push(data);
         }
       }
+    });
+
+    // Fire handler
+    this.onMessage("fire", (client, data: { aimAngle: number }) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player || player.isDowned) return;
+
+      const wep = WEAPONS[player.currentWeapon as WeaponId];
+      if (!wep) return;
+
+      const now = Date.now();
+      const cooldown = 1000 / wep.fireRatePerSec;
+      if (now - player.lastFireTimestamp < cooldown) return;
+
+      // TODO: enforce ammo limits in Prompt 19 (treating as unlimited for v1.0)
+
+      // Spawn bullet
+      const spreadAngle = data.aimAngle + (Math.random() - 0.5) * wep.spread;
+      const spawnDist = 35;
+      const bx = player.x + Math.cos(data.aimAngle) * spawnDist;
+      const by = player.y + Math.sin(data.aimAngle) * spawnDist;
+
+      const bullet = new BulletSchema();
+      bullet.id = `b${++this.bulletIdCounter}`;
+      bullet.ownerId = client.sessionId;
+      bullet.weaponId = player.currentWeapon;
+      bullet.x = bx;
+      bullet.y = by;
+      bullet.vx = Math.cos(spreadAngle) * wep.bulletSpeed;
+      bullet.vy = Math.sin(spreadAngle) * wep.bulletSpeed;
+      bullet.spawnedAt = now;
+
+      this.state.bullets.set(bullet.id, bullet);
+      player.lastFireTimestamp = now;
     });
 
     // Ping handler
@@ -93,6 +130,32 @@ export class PatriotRoom extends Room<RoomStateSchema> {
       }
       inputs.length = 0;
     });
+
+    // Simulate bullets
+    const now = Date.now();
+    const toRemove: string[] = [];
+    this.state.bullets.forEach((bullet, id) => {
+      bullet.x += bullet.vx * (deltaTime / 1000);
+      bullet.y += bullet.vy * (deltaTime / 1000);
+
+      const wep = WEAPONS[bullet.weaponId as WeaponId];
+      if (now - bullet.spawnedAt > (wep?.bulletLifetimeMs ?? 1000)) {
+        toRemove.push(id);
+        return;
+      }
+      if (bullet.x < 0 || bullet.x > PATRIOT_MAP.width || bullet.y < 0 || bullet.y > PATRIOT_MAP.height) {
+        toRemove.push(id);
+        return;
+      }
+      if (checkWallCollision(bullet.x, bullet.y, wep?.bulletRadius ?? 4)) {
+        toRemove.push(id);
+        return;
+      }
+      // Player hit detection → Prompt 10
+    });
+    for (const id of toRemove) {
+      this.state.bullets.delete(id);
+    }
   }
 
   private applyInput(player: PlayerSchema, input: InputCommand, dt: number) {

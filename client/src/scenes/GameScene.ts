@@ -4,13 +4,16 @@ import {
   PLAYER_RUN_SPEED,
   PLAYER_RADIUS,
   RECONCILIATION_THRESHOLD,
+  WEAPONS,
 } from "@patriot/shared";
-import type { InputCommand } from "@patriot/shared";
+import type { InputCommand, WeaponId } from "@patriot/shared";
 import { InputManager } from "../input/InputManager.js";
 import { InputDebugOverlay } from "../ui/InputDebugOverlay.js";
 import { getDebugFlag } from "../utils/settings.js";
 import type { DeviceProfile } from "../utils/deviceProfile.js";
 import { Player } from "../entities/Player.js";
+import { Bullet } from "../entities/Bullet.js";
+import { MuzzleFlash } from "../effects/MuzzleFlash.js";
 import type { NetworkManager } from "../network/NetworkManager.js";
 import { checkWallCollisionClient } from "../systems/collisionClient.js";
 
@@ -31,6 +34,8 @@ export class GameScene extends Phaser.Scene {
   private freeCam = false;
   private freeCamKeys!: Record<string, Phaser.Input.Keyboard.Key>;
   private networkManager: NetworkManager | null = null;
+  private bullets = new Map<string, Bullet>();
+  private lastFireTime = 0;
   private sessionId = "";
   private stateSetup = false;
 
@@ -181,6 +186,8 @@ export class GameScene extends Phaser.Scene {
       this.localPlayer?.destroy();
       this.remotePlayers.forEach((p) => p.destroy());
       this.remotePlayers.clear();
+      this.bullets.forEach((b) => b.destroy());
+      this.bullets.clear();
       this.debugOverlay?.destroy();
       this.debugOverlay = null;
     });
@@ -236,6 +243,50 @@ export class GameScene extends Phaser.Scene {
           }
         }
       });
+
+      // Sync bullets
+      room.state.bullets.forEach((b: any, id: string) => {
+        let bv = this.bullets.get(id);
+        if (!bv) {
+          bv = new Bullet(this, id, b.x, b.y, b.weaponId);
+          this.bullets.set(id, bv);
+          // Muzzle flash for remote player's new bullet
+          if (b.ownerId !== this.sessionId) {
+            new MuzzleFlash(this, b.x, b.y);
+          }
+        } else {
+          bv.setPosition(b.x, b.y);
+        }
+      });
+
+      // Remove despawned bullets
+      const serverIds = new Set<string>();
+      room.state.bullets.forEach((_b: any, id: string) => serverIds.add(id));
+      this.bullets.forEach((bv, id) => {
+        if (!serverIds.has(id)) {
+          bv.destroy();
+          this.bullets.delete(id);
+        }
+      });
+    });
+
+    // Bullet add/remove listeners
+    room.state.bullets.onAdd((b: any, id: string) => {
+      if (!this.bullets.has(id)) {
+        const bv = new Bullet(this, id, b.x, b.y, b.weaponId);
+        this.bullets.set(id, bv);
+        if (b.ownerId !== this.sessionId) {
+          new MuzzleFlash(this, b.x, b.y);
+        }
+      }
+    });
+
+    room.state.bullets.onRemove((_b: any, id: string) => {
+      const bv = this.bullets.get(id);
+      if (bv) {
+        bv.destroy();
+        this.bullets.delete(id);
+      }
     });
   }
 
@@ -360,6 +411,22 @@ export class GameScene extends Phaser.Scene {
         angle,
         im.fireHeld
       );
+
+      // Fire weapon
+      if (im.firePressed) {
+        const now = Date.now();
+        const wep = WEAPONS["pistol" as WeaponId];
+        const cooldown = 1000 / wep.fireRatePerSec;
+        if (now - this.lastFireTime >= cooldown) {
+          this.lastFireTime = now;
+          const room = this.networkManager.getRoom();
+          room?.send("fire", { aimAngle: angle });
+          // Predicted muzzle flash
+          const fx = this.localPlayer.sprite.x + Math.cos(angle) * 35;
+          const fy = this.localPlayer.sprite.y + Math.sin(angle) * 35;
+          new MuzzleFlash(this, fx, fy);
+        }
+      }
     }
 
     // Update all players

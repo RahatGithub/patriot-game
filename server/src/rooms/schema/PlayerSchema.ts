@@ -6,7 +6,7 @@ export class PlayerSchema extends Schema {
   @type("boolean") isCreator: boolean;
   @type("number") joinedAt: number;
 
-  // Game state (Prompt 08)
+  // Game state
   @type("number") x: number = 0;
   @type("number") y: number = 0;
   @type("number") aimAngle: number = 0;
@@ -14,4 +14,9 @@ export class PlayerSchema extends Schema {
   @type("boolean") isDowned: boolean = false;
   @type("string") rank: string = "soldier";
   @type("number") lastProcessedInput: number = 0;
+
+  // Weapon state
+  @type("string") currentWeapon: string = "pistol";
+  @type("number") ammo: number = 30;
+  @type("number") lastFireTimestamp: number = 0;
 }
