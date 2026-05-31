@@ -37,3 +37,4 @@ export const CRATE_RADIUS = 30;
 export const CRATE_HP = 20;
 export const PICKUP_INTERACT_RANGE = 50;
 export const PICKUP_AUTO_RANGE = 30;
+export const MAX_GRENADES = 3;

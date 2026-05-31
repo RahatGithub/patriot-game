@@ -32,4 +32,5 @@ export class PlayerSchema extends Schema {
   @type("number") damageTaken: number = 0;
   @type("number") checkpointsCaptured: number = 0;
   @type("number") revives: number = 0;
+  @type("number") grenadeCount: number = 0;
 }

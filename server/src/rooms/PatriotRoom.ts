@@ -20,6 +20,7 @@ import {
   PICKUP_AUTO_RANGE,
   PICKUP_INTERACT_RANGE,
   PLAYER_MAX_HP,
+  MAX_GRENADES,
 } from "@patriot/shared";
 import type { InputCommand, WeaponId, DamageSource, MatchResult } from "@patriot/shared";
 import { RoomStateSchema } from "./schema/RoomStateSchema.js";
@@ -433,14 +434,32 @@ export class PatriotRoom extends Room<RoomStateSchema> {
         this.broadcast("cureUsed", { playerId: player.id, x: pickup.x, y: pickup.y });
         console.log(`[Room ${this.state.code}] ${player.name} picked up cure`);
         break;
-      // case 'weapon_*': Prompt 21
+      case "weapon_pistol":
+      case "weapon_mk18":
+      case "weapon_grenade":
+      case "weapon_mg":
+      case "weapon_bazooka": {
+        const weaponId = pickup.type.replace("weapon_", "") as WeaponId;
+        if (weaponId === "grenade") {
+          if (player.grenadeCount >= MAX_GRENADES) return; // Full — grenade stays
+          player.grenadeCount = Math.min(MAX_GRENADES, player.grenadeCount + 3);
+        } else {
+          player.currentWeapon = weaponId;
+          const def = WEAPONS[weaponId];
+          if (def.ammo !== "unlimited") player.ammo = def.ammo as number;
+        }
+        this.state.pickups.delete(pickupId);
+        this.broadcast("weaponPicked", { playerId: player.id, weaponId });
+        console.log(`[Room ${this.state.code}] ${player.name} picked up ${weaponId}`);
+        break;
+      }
       default:
         console.warn(`Unknown pickup type: ${pickup.type}`);
     }
   }
 
   private isAutoPickupType(type: string): boolean {
-    return type === "cure" || type === "test";
+    return type === "cure";
   }
 
   private snapshotStats() {

@@ -12,6 +12,7 @@ export class HUDScene extends Phaser.Scene {
   private rankText!: Phaser.GameObjects.Text;
   private minimapGfx!: Phaser.GameObjects.Graphics;
   private timerText!: Phaser.GameObjects.Text;
+  private grenadeText!: Phaser.GameObjects.Text;
   private timerPulsePhase = 0;
 
   constructor() {
@@ -56,6 +57,10 @@ export class HUDScene extends Phaser.Scene {
     this.weaponText = this.add.text(20, H - 45, "Pistol  30/\u221e", {
       fontSize: "13px",
       color: "#aaa",
+    });
+    this.grenadeText = this.add.text(170, H - 45, "", {
+      fontSize: "13px",
+      color: "#556b2f",
     });
 
     // HP bar
@@ -122,9 +127,14 @@ export class HUDScene extends Phaser.Scene {
             this.hpText.setText(`HP: ${hp}/100`);
             this.hpText.setColor(hp > 30 ? "#4caf50" : "#cc2222");
 
-            const wepName = me.currentWeapon === "pistol" ? "Pistol" : me.currentWeapon === "mk18" ? "MK18" : me.currentWeapon;
-            const ammoStr = me.currentWeapon === "pistol" ? "30/\u221e" : "\u221e";
+            const wepId = me.currentWeapon || "pistol";
+            const wepNames: Record<string, string> = { pistol: "Pistol", mk18: "MK18", mg: "MG", bazooka: "Bazooka", grenade: "Grenade" };
+            const wepName = wepNames[wepId] || wepId;
+            const ammoStr = me.ammo != null && me.ammo > 0 ? `${me.ammo}` : "\u221e";
             this.weaponText.setText(`${wepName}  ${ammoStr}`);
+
+            const gc = me.grenadeCount ?? 0;
+            this.grenadeText.setText(gc > 0 ? `\uD83D\uDCA3\u00D7${gc}` : "");
           }
 
           // Mini-map update

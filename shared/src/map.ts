@@ -244,27 +244,27 @@ export const PATRIOT_MAP: MapDefinition = {
   crates: [
     // Outdoor 1 / spawn area
     { id: "crate_1", x: 400, y: 500, content: "cure" },
-    { id: "crate_2", x: 700, y: 700, content: "test" },
+    { id: "crate_2", x: 700, y: 700, content: "weapon_mk18" },
     { id: "crate_3", x: 300, y: 1100, content: "cure" },
     // Pool area
-    { id: "crate_4", x: 1400, y: 300, content: "test" },
-    { id: "crate_5", x: 2050, y: 500, content: "test" },
+    { id: "crate_4", x: 1400, y: 300, content: "weapon_mk18" },
+    { id: "crate_5", x: 2050, y: 500, content: "weapon_grenade" },
     // Near checkpoints
     { id: "crate_6", x: 550, y: 900, content: "cure" },
     { id: "crate_7", x: 1600, y: 1200, content: "cure" },
-    { id: "crate_8", x: 1700, y: 500, content: "test" },
+    { id: "crate_8", x: 1700, y: 500, content: "weapon_mk18" },
     // Indoor building
-    { id: "crate_9", x: 2600, y: 400, content: "test" },
+    { id: "crate_9", x: 2600, y: 400, content: "weapon_mg" },
     { id: "crate_10", x: 3200, y: 500, content: "cure" },
-    { id: "crate_11", x: 2600, y: 1200, content: "test" },
-    { id: "crate_12", x: 3300, y: 1000, content: "test" },
+    { id: "crate_11", x: 2600, y: 1200, content: "weapon_mk18" },
+    { id: "crate_12", x: 3300, y: 1000, content: "weapon_grenade" },
     // Outdoor 2 / road
     { id: "crate_13", x: 1500, y: 1800, content: "cure" },
-    { id: "crate_14", x: 1900, y: 1500, content: "test" },
+    { id: "crate_14", x: 1900, y: 1500, content: "weapon_mg" },
     // Basement
-    { id: "crate_15", x: 2600, y: 2000, content: "test" },
+    { id: "crate_15", x: 2600, y: 2000, content: "weapon_mk18" },
     { id: "crate_16", x: 3400, y: 2200, content: "cure" },
-    { id: "crate_17", x: 3100, y: 2700, content: "test" },
-    { id: "crate_18", x: 2700, y: 2600, content: "test" },
+    { id: "crate_17", x: 3100, y: 2700, content: "weapon_bazooka" },
+    { id: "crate_18", x: 2700, y: 2600, content: "cure" },
   ],
 };

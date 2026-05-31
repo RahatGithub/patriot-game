@@ -22,6 +22,8 @@ import { CheckpointFlag } from "../entities/CheckpointFlag.js";
 import { Crate } from "../entities/Crate.js";
 import { Pickup } from "../entities/Pickup.js";
 import { getStateCallbacks } from "colyseus.js";
+import { PickupPromptUI } from "../ui/PickupPromptUI.js";
+import { PICKUP_INTERACT_RANGE } from "@patriot/shared";
 
 const FREE_CAM_SPEED = 600;
 
@@ -67,6 +69,7 @@ export class GameScene extends Phaser.Scene {
   // Crates + Pickups
   private crateEntities = new Map<string, Crate>();
   private pickupEntities = new Map<string, Pickup>();
+  private pickupPrompt = new PickupPromptUI();
 
   constructor() {
     super("GameScene");
@@ -185,17 +188,6 @@ export class GameScene extends Phaser.Scene {
       }
     });
 
-    // F6 — debug weapon switch (dev only, removed in Prompt 21)
-    const f6Key = kb.addKey(Phaser.Input.Keyboard.KeyCodes.F6);
-    kb.addCapture([Phaser.Input.Keyboard.KeyCodes.F6]);
-    const debugWeapons: WeaponId[] = ["pistol", "mk18"];
-    let debugWepIdx = 0;
-    f6Key.on("down", () => {
-      debugWepIdx = (debugWepIdx + 1) % debugWeapons.length;
-      const newWep = debugWeapons[debugWepIdx];
-      this.networkManager?.getRoom()?.send("debugSetWeapon", { weaponId: newWep });
-    });
-
     if (getDebugFlag("input")) {
       this.debugOverlay = new InputDebugOverlay(this.inputManager);
     }
@@ -282,6 +274,7 @@ export class GameScene extends Phaser.Scene {
       this.crateEntities.clear();
       this.pickupEntities.forEach((p) => p.destroy());
       this.pickupEntities.clear();
+      this.pickupPrompt.hide();
       this.debugOverlay?.destroy();
       this.debugOverlay = null;
     });
@@ -636,6 +629,29 @@ export class GameScene extends Phaser.Scene {
       }
     });
 
+    // Weapon picked up effect
+    room.onMessage("weaponPicked", (data: any) => {
+      const { playerId, weaponId } = data;
+      console.log(`[GameScene] Weapon picked: ${weaponId} by ${playerId}`);
+
+      const player =
+        playerId === this.sessionId
+          ? this.localPlayer
+          : this.remotePlayers.get(playerId);
+      if (player) {
+        (player.sprite as any).setTint?.(0xffaa44);
+        this.time.delayedCall(200, () => (player.sprite as any).clearTint?.());
+      }
+
+      // Grenade notification for local player
+      if (playerId === this.sessionId && weaponId === "grenade") {
+        this.showWeaponNotification("Picked up 3 grenades!");
+      } else if (playerId === this.sessionId) {
+        const name = weaponId.charAt(0).toUpperCase() + weaponId.slice(1);
+        this.showWeaponNotification(`Equipped ${name}`);
+      }
+    });
+
     // --- Pickup sync ---
     $(room.state).pickups.onAdd((pk: any, id: string) => {
       if (!this.pickupEntities.has(id)) {
@@ -654,6 +670,10 @@ export class GameScene extends Phaser.Scene {
       if (this.matchEnded) return;
       room.send("interact");
     });
+
+    // N key dismisses pickup prompt
+    const nKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.N);
+    nKey.on("down", () => this.pickupPrompt.hide());
   }
 
   private onPlayerAdd(p: any, sid: string) {
@@ -827,8 +847,9 @@ export class GameScene extends Phaser.Scene {
     // Update checkpoint zone visuals + capture progress bar
     this.updateCheckpoints();
 
-    // Update pickups (bob animation)
+    // Update pickups (bob animation) + proximity prompt
     this.pickupEntities.forEach((pk) => pk.update(delta));
+    this.updatePickupPrompt();
   }
 
   private toggleGrid() {
@@ -1096,6 +1117,65 @@ export class GameScene extends Phaser.Scene {
       .setText(`WAVE ${waveNumber}!`)
       .setPosition(cam.width / 2, 120)
       .setAlpha(1)
+      .setVisible(true);
+
+    this.tweens.add({
+      targets: this.waveNotification,
+      alpha: 0,
+      delay: 1500,
+      duration: 500,
+      onComplete: () => this.waveNotification?.setVisible(false),
+    });
+  }
+
+  private updatePickupPrompt() {
+    if (!this.localPlayer || this.matchEnded) {
+      this.pickupPrompt.hide();
+      return;
+    }
+
+    const cam = this.cameras.main;
+    let closestPk: Pickup | null = null;
+    let closestDist = PICKUP_INTERACT_RANGE;
+    let closestType = "";
+    let closestId = "";
+
+    // Check server state pickups for type (client entities may not have it synced)
+    const room = this.networkManager?.getRoom();
+    if (!room) { this.pickupPrompt.hide(); return; }
+
+    (room.state as any).pickups?.forEach((pk: any, id: string) => {
+      if (pk.type === "cure") return; // Cure is auto-pickup, no prompt
+      const ent = this.pickupEntities.get(id);
+      if (!ent) return;
+      const dx = this.localPlayer!.sprite.x - pk.x;
+      const dy = this.localPlayer!.sprite.y - pk.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < closestDist) {
+        closestDist = dist;
+        closestPk = ent;
+        closestType = pk.type;
+        closestId = id;
+      }
+    });
+
+    if (closestPk && closestType.startsWith("weapon_")) {
+      const sx = (closestPk.x - cam.scrollX) * cam.zoom;
+      const sy = (closestPk.y - cam.scrollY) * cam.zoom;
+      this.pickupPrompt.show(closestId, closestType, sx, sy);
+    } else {
+      this.pickupPrompt.hide();
+    }
+  }
+
+  private showWeaponNotification(text: string) {
+    if (!this.waveNotification) return;
+    const cam = this.cameras.main;
+    this.waveNotification
+      .setText(text)
+      .setPosition(cam.width / 2, 120)
+      .setAlpha(1)
+      .setColor("#ffaa44")
       .setVisible(true);
 
     this.tweens.add({
