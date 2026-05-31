@@ -1,0 +1,21 @@
+{
+  "name": "patriot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "shared",
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "dev:server": "npm run dev --workspace=@patriot/server",
+    "dev:client": "npm run dev --workspace=@patriot/client",
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "build": "npm run build --workspace=@patriot/shared && npm run build --workspace=@patriot/server && npm run build --workspace=@patriot/client",
+    "install:all": "npm install"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
+  }
+}
