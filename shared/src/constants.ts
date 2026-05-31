@@ -5,3 +5,5 @@ export const MAX_PLAYERS_PER_ROOM = 10;
 export const MIN_PLAYERS_TO_START = 2;
 export const ROOM_CODE_LENGTH = 6;
 export const ROOM_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
+export const ROOM_CODE_CHARSET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+export const VALID_CHECKPOINT_COUNTS = [3, 5, 7] as const;
