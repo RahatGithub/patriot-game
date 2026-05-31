@@ -41,3 +41,6 @@ export const MAX_GRENADES = 3;
 export const REVIVE_RANGE = 60;
 export const REVIVE_DURATION_MS = 4000;
 export const REVIVE_RESULT_HP = 50;
+export const BARREL_EXPLOSION_RADIUS = 150;
+export const BARREL_HITBOX_RADIUS = 24;
+export const BARREL_CHAIN_DELAY_MS = 100;

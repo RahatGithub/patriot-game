@@ -5,6 +5,7 @@ import { AISchema } from "./AISchema.js";
 import { CheckpointSchema } from "./CheckpointSchema.js";
 import { CrateSchema } from "./CrateSchema.js";
 import { PickupSchema } from "./PickupSchema.js";
+import { BarrelSchema } from "./BarrelSchema.js";
 
 export class RoomStateSchema extends Schema {
   @type("string") code: string;
@@ -25,4 +26,5 @@ export class RoomStateSchema extends Schema {
   @type({ map: CheckpointSchema }) checkpoints = new MapSchema<CheckpointSchema>();
   @type({ map: CrateSchema }) crates = new MapSchema<CrateSchema>();
   @type({ map: PickupSchema }) pickups = new MapSchema<PickupSchema>();
+  @type({ map: BarrelSchema }) barrels = new MapSchema<BarrelSchema>();
 }

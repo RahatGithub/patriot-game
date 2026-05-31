@@ -53,7 +53,7 @@ export interface SpawnZone {
   height: number;
 }
 
-import type { PatrolPath, AISpawnDef, CrateDef } from "./types.js";
+import type { PatrolPath, AISpawnDef, CrateDef, BarrelDef } from "./types.js";
 
 export interface MapDefinition {
   width: number;
@@ -67,6 +67,7 @@ export interface MapDefinition {
   patrolPaths: PatrolPath[];
   initialAISpawns: AISpawnDef[];
   crates: CrateDef[];
+  barrels: BarrelDef[];
 }
 
 export const PATRIOT_MAP: MapDefinition = {
@@ -266,5 +267,27 @@ export const PATRIOT_MAP: MapDefinition = {
     { id: "crate_16", x: 3400, y: 2200, content: "cure" },
     { id: "crate_17", x: 3100, y: 2700, content: "weapon_bazooka" },
     { id: "crate_18", x: 2700, y: 2600, content: "cure" },
+  ],
+
+  barrels: [
+    // Near CP1 — spawn area tactical cover
+    { id: "barrel_1", x: 700, y: 600 },
+    { id: "barrel_2", x: 730, y: 620 },   // close to barrel_1 for chain reaction
+    // Near CP2 — central road
+    { id: "barrel_3", x: 1800, y: 1100 },
+    { id: "barrel_4", x: 1650, y: 1400 },
+    // Near CP3 — pool area edge
+    { id: "barrel_5", x: 1500, y: 500 },
+    // Indoor cluster — tight rooms, high damage potential
+    { id: "barrel_6", x: 2600, y: 500 },
+    { id: "barrel_7", x: 2620, y: 530 },  // chain cluster with barrel_6
+    { id: "barrel_8", x: 3300, y: 800 },
+    // Near CP4
+    { id: "barrel_9", x: 2900, y: 1000 },
+    // Basement — underground area
+    { id: "barrel_10", x: 2700, y: 2100 },
+    { id: "barrel_11", x: 3200, y: 2300 },
+    { id: "barrel_12", x: 3500, y: 2600 },
+    { id: "barrel_13", x: 3520, y: 2630 }, // chain cluster with barrel_12
   ],
 };

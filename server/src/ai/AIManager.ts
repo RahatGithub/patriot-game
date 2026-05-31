@@ -107,10 +107,10 @@ export class AIManager {
     this.state.ai.set(ai.id, ai);
   }
 
-  broadcastSound(x: number, y: number) {
+  broadcastSound(x: number, y: number, _type?: string, range: number = AI_SOUND_RANGE) {
     this.state.ai.forEach((ai) => {
       if (ai.isDead || ai.behaviorState === "chase") return;
-      if (Math.hypot(x - ai.x, y - ai.y) <= AI_SOUND_RANGE) {
+      if (Math.hypot(x - ai.x, y - ai.y) <= range) {
         this.enterAlertState(ai, x, y);
       }
     });

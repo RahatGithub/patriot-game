@@ -27,6 +27,8 @@ import {
   REVIVE_RANGE,
   REVIVE_DURATION_MS,
   REVIVE_RESULT_HP,
+  BARREL_HITBOX_RADIUS,
+  BARREL_EXPLOSION_RADIUS,
 } from "@patriot/shared";
 import type { RankId } from "@patriot/shared";
 import type { InputCommand, WeaponId, DamageSource, MatchResult } from "@patriot/shared";
@@ -40,6 +42,9 @@ import { AIManager } from "../ai/AIManager.js";
 import { CheckpointSchema } from "./schema/CheckpointSchema.js";
 import { CrateSchema } from "./schema/CrateSchema.js";
 import { PickupSchema } from "./schema/PickupSchema.js";
+import { BarrelSchema } from "./schema/BarrelSchema.js";
+import { applyAoE } from "../systems/aoe.js";
+import type { AoEParams } from "../systems/aoe.js";
 
 export class PatriotRoom extends Room<RoomStateSchema> {
   maxClients = MAX_PLAYERS_PER_ROOM;
@@ -213,6 +218,7 @@ export class PatriotRoom extends Room<RoomStateSchema> {
 
     this.initializeCheckpoints();
     this.initializeCrates();
+    this.initializeBarrels();
     this.aiManager.spawnWave(1);
 
     console.log(`[Room ${this.state.code}] Match started (${totalMs / 1000}s)`);
@@ -321,6 +327,21 @@ export class PatriotRoom extends Room<RoomStateSchema> {
             if (crate.hp <= 0) {
               this.destroyCrate(crate, crateId);
             }
+            toRemove.push(id);
+            hit = true;
+          }
+        });
+      }
+
+      // Barrel hit detection (one-shot explosion)
+      if (!hit) {
+        this.state.barrels.forEach((barrel, barrelId) => {
+          if (hit || barrel.exploded) return;
+          const dx = bullet.x - barrel.x;
+          const dy = bullet.y - barrel.y;
+          const r = BARREL_HITBOX_RADIUS + (wep?.bulletRadius ?? 4);
+          if (dx * dx + dy * dy < r * r) {
+            this.explodeBarrel(barrelId, bullet.ownerId);
             toRemove.push(id);
             hit = true;
           }
@@ -462,6 +483,131 @@ export class PatriotRoom extends Room<RoomStateSchema> {
       this.state.crates.set(c.id, c);
     });
     console.log(`[Room ${this.state.code}] Initialized ${PATRIOT_MAP.crates.length} crates`);
+  }
+
+  private initializeBarrels() {
+    PATRIOT_MAP.barrels.forEach((def) => {
+      const b = new BarrelSchema();
+      b.id = def.id;
+      b.x = def.x;
+      b.y = def.y;
+      this.state.barrels.set(b.id, b);
+    });
+    console.log(`[Room ${this.state.code}] Initialized ${PATRIOT_MAP.barrels.length} barrels`);
+  }
+
+  explodeBarrel(barrelId: string, attackerId: string) {
+    const barrel = this.state.barrels.get(barrelId);
+    if (!barrel || barrel.exploded) return;
+    barrel.exploded = true;
+
+    this.broadcast("explosion", {
+      x: barrel.x,
+      y: barrel.y,
+      radius: BARREL_EXPLOSION_RADIUS,
+      source: "barrel_explosion",
+    });
+
+    applyAoE(this, {
+      source: "barrel_explosion",
+      x: barrel.x,
+      y: barrel.y,
+      radius: BARREL_EXPLOSION_RADIUS,
+      attackerId,
+      attackerFaction: this.attackerFactionOf(attackerId),
+      ignoreFriendlyFire: true,
+    });
+
+    // Alert nearby AI — explosions are louder than gunshots
+    this.aiManager.broadcastSound(barrel.x, barrel.y, "explosion", BARREL_EXPLOSION_RADIUS * 2);
+
+    // Remove barrel from state after a short delay (let chain trigger)
+    this.clock.setTimeout(() => this.state.barrels.delete(barrelId), 200);
+  }
+
+  private attackerFactionOf(attackerId: string): "player" | "ai" {
+    return attackerId.startsWith("ai_") ? "ai" : "player";
+  }
+
+  applyAoEDamageToPlayer(p: PlayerSchema, id: string, dmg: number, params: AoEParams) {
+    if (p.isDowned || p.isDead) return;
+
+    // Damage interrupts reviving
+    this.revivingMap.delete(id);
+
+    p.hp = Math.max(0, p.hp - dmg);
+    p.damageTaken += dmg;
+
+    const attacker = this.state.players.get(params.attackerId);
+    if (attacker) attacker.damageDealt += dmg;
+
+    this.broadcast("damage", {
+      targetId: id,
+      attackerId: params.attackerId,
+      amount: dmg,
+      x: p.x,
+      y: p.y,
+      source: params.source,
+    });
+
+    if (p.hp <= 0) {
+      this.downPlayer(p, id, params.attackerId);
+    }
+  }
+
+  private downPlayer(p: PlayerSchema, id: string, attackerId: string) {
+    p.isDowned = true;
+    p.hp = 0;
+    p.downedAt = Date.now();
+    p.downedBy = attackerId;
+
+    const killer = this.state.players.get(attackerId);
+    if (killer) {
+      killer.kills++;
+      this.checkPromotion(killer, attackerId);
+    }
+
+    this.broadcast("playerDowned", {
+      victimId: id,
+      killerId: attackerId,
+    });
+  }
+
+  applyAoEDamageToAI(
+    ai: import("./schema/AISchema.js").AISchema,
+    aiId: string,
+    dmg: number,
+    params: AoEParams
+  ) {
+    if (ai.isDead) return;
+    ai.hp = Math.max(0, ai.hp - dmg);
+
+    this.broadcast("damage", {
+      targetId: aiId,
+      attackerId: params.attackerId,
+      amount: dmg,
+      x: ai.x,
+      y: ai.y,
+      source: params.source,
+    });
+
+    if (ai.hp <= 0) {
+      ai.isDead = true;
+      ai.behaviorState = "dead";
+      ai.deathTime = Date.now();
+      this.state.totalAIKilled++;
+      this.broadcast("aiKilled", { aiId, killerId: params.attackerId, x: ai.x, y: ai.y });
+      const killer = this.state.players.get(params.attackerId);
+      if (killer) {
+        killer.kills++;
+        this.checkPromotion(killer, params.attackerId);
+      }
+    }
+  }
+
+  /** Public wrapper for AoE system to destroy crates */
+  destroyCratePublic(crate: CrateSchema, crateId: string) {
+    this.destroyCrate(crate, crateId);
   }
 
   private destroyCrate(crate: CrateSchema, crateId: string) {
@@ -719,21 +865,7 @@ export class PatriotRoom extends Room<RoomStateSchema> {
     });
 
     if (target.hp <= 0) {
-      target.isDowned = true;
-      target.hp = 0;
-      target.downedAt = Date.now();
-      target.downedBy = bullet.ownerId;
-
-      const killer = this.state.players.get(bullet.ownerId);
-      if (killer) {
-        killer.kills++;
-        this.checkPromotion(killer, bullet.ownerId);
-      }
-
-      this.broadcast("playerDowned", {
-        victimId: targetId,
-        killerId: bullet.ownerId,
-      });
+      this.downPlayer(target, targetId, bullet.ownerId);
     }
   }
 

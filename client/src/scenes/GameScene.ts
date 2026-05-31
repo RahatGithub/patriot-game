@@ -20,7 +20,9 @@ import { BloodSplatter } from "../effects/BloodSplatter.js";
 import { AIEntity } from "../entities/AIEntity.js";
 import { CheckpointFlag } from "../entities/CheckpointFlag.js";
 import { Crate } from "../entities/Crate.js";
+import { Barrel } from "../entities/Barrel.js";
 import { Pickup } from "../entities/Pickup.js";
+import { Explosion } from "../effects/Explosion.js";
 import { getStateCallbacks } from "colyseus.js";
 import { PickupPromptUI } from "../ui/PickupPromptUI.js";
 import { PICKUP_INTERACT_RANGE, canUseWeapon, REVIVE_RANGE } from "@patriot/shared";
@@ -74,6 +76,10 @@ export class GameScene extends Phaser.Scene {
   private reviveBarGfx: Phaser.GameObjects.Graphics | null = null;
   private revivePromptEl: HTMLElement | null = null;
 
+  // Barrels
+  private barrelEntities = new Map<string, Barrel>();
+  private showAoEDebug = false;
+
   constructor() {
     super("GameScene");
   }
@@ -88,6 +94,7 @@ export class GameScene extends Phaser.Scene {
     for (const key of rankSprites) {
       this.load.image(key, `/assets/sprites/characters/${key}.png`);
     }
+    this.load.image("barrel_explosive", "/assets/sprites/objects/barrel2_patriot.png");
     this.load.image("mafia_mk18", "/assets/sprites/characters/mafia_mk18.png");
     this.load.image("mafia_pistol", "/assets/sprites/characters/mafia_pistol.png");
     this.load.image("mafia_mg", "/assets/sprites/characters/mafia_mg.png");
@@ -197,6 +204,13 @@ export class GameScene extends Phaser.Scene {
       }
     });
 
+    const f9Key = kb.addKey(Phaser.Input.Keyboard.KeyCodes.F9);
+    kb.addCapture([Phaser.Input.Keyboard.KeyCodes.F9]);
+    f9Key.on("down", () => {
+      this.showAoEDebug = !this.showAoEDebug;
+      console.log(`[GameScene] AoE debug: ${this.showAoEDebug ? "ON" : "OFF"}`);
+    });
+
     if (getDebugFlag("input")) {
       this.debugOverlay = new InputDebugOverlay(this.inputManager);
     }
@@ -281,6 +295,8 @@ export class GameScene extends Phaser.Scene {
       this.capturedSet.clear();
       this.crateEntities.forEach((c) => c.destroy());
       this.crateEntities.clear();
+      this.barrelEntities.forEach((b) => b.destroy());
+      this.barrelEntities.clear();
       this.pickupEntities.forEach((p) => p.destroy());
       this.pickupEntities.clear();
       this.pickupPrompt.hide();
@@ -599,6 +615,53 @@ export class GameScene extends Phaser.Scene {
     room.onMessage("crateDestroyed", (data: any) => {
       const ent = this.crateEntities.get(data.crateId);
       if (ent && !ent.destroyed) ent.playDestruction();
+    });
+
+    // --- Barrel sync ---
+    $(room.state).barrels.onAdd((barrel: any, id: string) => {
+      if (!this.barrelEntities.has(id)) {
+        const ent = new Barrel(this, id, barrel.x, barrel.y);
+        this.barrelEntities.set(id, ent);
+      }
+    });
+    $(room.state).barrels.onRemove((_b: any, id: string) => {
+      const ent = this.barrelEntities.get(id);
+      if (ent) { ent.destroy(); this.barrelEntities.delete(id); }
+    });
+
+    // Barrel state updates (exploded flag)
+    room.onStateChange(() => {
+      (room.state as any).barrels?.forEach((b: any, id: string) => {
+        const ent = this.barrelEntities.get(id);
+        if (ent && !ent.exploded && b.exploded) ent.setExploded();
+      });
+    });
+
+    // --- Explosion event ---
+    room.onMessage("explosion", (data: any) => {
+      const { x, y, radius } = data;
+      new Explosion(this, x, y, radius);
+
+      // Screen shake if local player is nearby
+      if (this.localPlayer) {
+        const dx = this.localPlayer.sprite.x - x;
+        const dy = this.localPlayer.sprite.y - y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 300) {
+          const intensity = 0.01 * (1 - dist / 300);
+          this.cameras.main.shake(200, Math.max(0.005, intensity));
+        }
+      }
+
+      // F9 debug: show AoE radius circle
+      if (this.showAoEDebug) {
+        const debugCircle = this.add.graphics().setDepth(50);
+        debugCircle.lineStyle(2, 0xff0000, 0.5);
+        debugCircle.strokeCircle(x, y, radius);
+        debugCircle.fillStyle(0xff0000, 0.1);
+        debugCircle.fillCircle(x, y, radius);
+        this.time.delayedCall(500, () => debugCircle.destroy());
+      }
     });
 
     // Cure used effect

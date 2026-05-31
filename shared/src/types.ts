@@ -89,3 +89,9 @@ export interface CrateDef {
   y: number;
   content: PickupType;
 }
+
+export interface BarrelDef {
+  id: string;
+  x: number;
+  y: number;
+}
