@@ -176,11 +176,12 @@ export class HUDScene extends Phaser.Scene {
       gfx.fillCircle(dotX, dotY, 4);
     });
 
-    // Draw pickup dots
+    // Draw pickup dots (green for cure, white for others)
     room.state.pickups?.forEach((pk: any) => {
       const px = MINIMAP_X + pk.x * scaleX;
       const py = MINIMAP_Y + pk.y * scaleY;
-      gfx.fillStyle(0xffffff, 0.8);
+      const color = pk.type === "cure" ? 0x44ff44 : 0xffffff;
+      gfx.fillStyle(color, 0.8);
       gfx.fillCircle(px, py, 2);
     });
 

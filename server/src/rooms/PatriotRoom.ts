@@ -19,6 +19,7 @@ import {
   CRATE_RADIUS,
   PICKUP_AUTO_RANGE,
   PICKUP_INTERACT_RANGE,
+  PLAYER_MAX_HP,
 } from "@patriot/shared";
 import type { InputCommand, WeaponId, DamageSource, MatchResult } from "@patriot/shared";
 import { RoomStateSchema } from "./schema/RoomStateSchema.js";
@@ -425,7 +426,13 @@ export class PatriotRoom extends Room<RoomStateSchema> {
         console.log(`[Room ${this.state.code}] ${player.name} picked up TEST pickup ${pickupId}`);
         this.state.pickups.delete(pickupId);
         break;
-      // case 'cure': Prompt 20
+      case "cure":
+        if (player.hp >= PLAYER_MAX_HP) return; // Don't waste — cure stays
+        player.hp = PLAYER_MAX_HP;
+        this.state.pickups.delete(pickupId);
+        this.broadcast("cureUsed", { playerId: player.id, x: pickup.x, y: pickup.y });
+        console.log(`[Room ${this.state.code}] ${player.name} picked up cure`);
+        break;
       // case 'weapon_*': Prompt 21
       default:
         console.warn(`Unknown pickup type: ${pickup.type}`);

@@ -61,16 +61,24 @@ export class Pickup {
 
   private drawIcon(color: number, glowAlpha: number) {
     this.gfx.clear();
-    // Glow ring
+    // Glow ring (larger for cure)
+    const glowExtra = this.type === "cure" ? 6 : 4;
     if (glowAlpha > 0) {
       this.gfx.fillStyle(color, glowAlpha * 0.3);
-      this.gfx.fillCircle(this.x, this.y, ICON_RADIUS + 4);
+      this.gfx.fillCircle(this.x, this.y, ICON_RADIUS + glowExtra);
     }
     // Main circle
     this.gfx.fillStyle(color, 0.85);
     this.gfx.fillCircle(this.x, this.y, ICON_RADIUS);
     this.gfx.lineStyle(1, 0xffffff, 0.4);
     this.gfx.strokeCircle(this.x, this.y, ICON_RADIUS);
+
+    // White cross for cure type
+    if (this.type === "cure") {
+      this.gfx.fillStyle(0xffffff, 0.9);
+      this.gfx.fillRect(this.x - 2, this.y - 7, 4, 14);
+      this.gfx.fillRect(this.x - 7, this.y - 2, 14, 4);
+    }
   }
 
   update(dt: number) {

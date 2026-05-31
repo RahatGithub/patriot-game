@@ -21,6 +21,7 @@ import { AIEntity } from "../entities/AIEntity.js";
 import { CheckpointFlag } from "../entities/CheckpointFlag.js";
 import { Crate } from "../entities/Crate.js";
 import { Pickup } from "../entities/Pickup.js";
+import { getStateCallbacks } from "colyseus.js";
 
 const FREE_CAM_SPEED = 600;
 
@@ -61,6 +62,7 @@ export class GameScene extends Phaser.Scene {
   private localPlayerWasDead = false;
   private matchEnded = false;
   private lastWaveCount = 0;
+  private debugFrameCount = 0;
 
   // Crates + Pickups
   private crateEntities = new Map<string, Crate>();
@@ -289,9 +291,13 @@ export class GameScene extends Phaser.Scene {
 
   private setupNetworking() {
     const room = this.networkManager?.getRoom();
-    if (!room) return;
+    if (!room) {
+      console.warn("[GameScene] setupNetworking: no room found");
+      return;
+    }
 
     this.sessionId = room.sessionId;
+    console.log(`[GameScene] Network setup complete, sessionId: ${this.sessionId}`);
 
     // Wait for state to sync, then set up player listeners
     const pollState = setInterval(() => {
@@ -305,25 +311,32 @@ export class GameScene extends Phaser.Scene {
     if (this.stateSetup) return;
     this.stateSetup = true;
 
+    const $ = getStateCallbacks(room);
+
     // Process existing players
     room.state.players.forEach((p: any, sid: string) => {
       this.onPlayerAdd(p, sid);
     });
 
     // Listen for new players
-    room.state.players.onAdd((p: any, sid: string) => {
-      if (!this.remotePlayers.has(sid) && sid !== this.sessionId) {
+    $(room.state).players.onAdd((p: any, sid: string) => {
+      const isLocal = sid === this.sessionId;
+      console.log(`[GameScene] onAdd fired for sessionId: ${sid}, isLocal: ${isLocal}, name: ${p.name}`);
+      if (!this.remotePlayers.has(sid) && !isLocal) {
         this.onPlayerAdd(p, sid);
       }
     });
 
     // Listen for player removal
-    room.state.players.onRemove((_p: any, sid: string) => {
+    $(room.state).players.onRemove((_p: any, sid: string) => {
       this.onPlayerRemove(sid);
     });
 
     // Listen for state changes — update remote players + reconcile local
     room.onStateChange(() => {
+      let playerCount = 0;
+      room.state.players.forEach(() => playerCount++);
+      console.log(`[GameScene] State change: ${playerCount} players, my sessionId: ${this.sessionId}, remotePlayers.size: ${this.remotePlayers.size}`);
       room.state.players.forEach((p: any, sid: string) => {
         if (sid === this.sessionId) {
           this.reconcileLocal(p);
@@ -398,7 +411,7 @@ export class GameScene extends Phaser.Scene {
     });
 
     // Bullet add/remove listeners
-    room.state.bullets.onAdd((b: any, id: string) => {
+    $(room.state).bullets.onAdd((b: any, id: string) => {
       if (!this.bullets.has(id)) {
         const bv = new Bullet(this, id, b.x, b.y, b.weaponId);
         this.bullets.set(id, bv);
@@ -408,7 +421,7 @@ export class GameScene extends Phaser.Scene {
       }
     });
 
-    room.state.bullets.onRemove((_b: any, id: string) => {
+    $(room.state).bullets.onRemove((_b: any, id: string) => {
       const bv = this.bullets.get(id);
       if (bv) {
         bv.destroy();
@@ -471,14 +484,14 @@ export class GameScene extends Phaser.Scene {
     });
 
     // --- AI entity sync ---
-    room.state.ai.onAdd((ai: any, id: string) => {
+    $(room.state).ai.onAdd((ai: any, id: string) => {
       if (!this.aiEntities.has(id)) {
         const ent = new AIEntity(this, id, ai.x, ai.y, ai.weapon);
         this.aiEntities.set(id, ent);
       }
     });
 
-    room.state.ai.onRemove((_ai: any, id: string) => {
+    $(room.state).ai.onRemove((_ai: any, id: string) => {
       const ent = this.aiEntities.get(id);
       if (ent) {
         ent.destroy();
@@ -487,7 +500,7 @@ export class GameScene extends Phaser.Scene {
     });
 
     // --- Checkpoint sync ---
-    room.state.checkpoints.onAdd((cp: any, id: string) => {
+    $(room.state).checkpoints.onAdd((cp: any, id: string) => {
       if (!this.checkpointFlags.has(id)) {
         const flag = new CheckpointFlag(this, cp.x, cp.y);
         this.checkpointFlags.set(id, flag);
@@ -508,7 +521,7 @@ export class GameScene extends Phaser.Scene {
       }
     });
 
-    room.state.checkpoints.onRemove((_cp: any, id: string) => {
+    $(room.state).checkpoints.onRemove((_cp: any, id: string) => {
       this.checkpointFlags.get(id)?.destroy();
       this.checkpointFlags.delete(id);
       this.checkpointLabels.get(id)?.destroy();
@@ -551,13 +564,13 @@ export class GameScene extends Phaser.Scene {
     });
 
     // --- Crate sync ---
-    room.state.crates.onAdd((crate: any, id: string) => {
+    $(room.state).crates.onAdd((crate: any, id: string) => {
       if (!this.crateEntities.has(id)) {
         const ent = new Crate(this, id, crate.x, crate.y);
         this.crateEntities.set(id, ent);
       }
     });
-    room.state.crates.onRemove((_c: any, id: string) => {
+    $(room.state).crates.onRemove((_c: any, id: string) => {
       const ent = this.crateEntities.get(id);
       if (ent) { ent.destroy(); this.crateEntities.delete(id); }
     });
@@ -582,14 +595,55 @@ export class GameScene extends Phaser.Scene {
       if (ent && !ent.destroyed) ent.playDestruction();
     });
 
+    // Cure used effect
+    room.onMessage("cureUsed", (data: any) => {
+      const { playerId, x, y } = data;
+      console.log(`[GameScene] Cure used by ${playerId}`);
+
+      // Green sparkle particles at pickup location
+      for (let i = 0; i < 5; i++) {
+        const spark = this.add
+          .circle(
+            x + (Math.random() - 0.5) * 20,
+            y + (Math.random() - 0.5) * 20,
+            3, 0x44ff44
+          )
+          .setDepth(30);
+        this.tweens.add({
+          targets: spark,
+          x: spark.x + (Math.random() - 0.5) * 50,
+          y: spark.y - 20 - Math.random() * 30,
+          alpha: 0,
+          scale: 0.3,
+          duration: 500 + Math.random() * 200,
+          onComplete: () => spark.destroy(),
+        });
+      }
+
+      // Green flash on the player sprite
+      const player =
+        playerId === this.sessionId
+          ? this.localPlayer
+          : this.remotePlayers.get(playerId);
+      if (player) {
+        (player.sprite as any).setTint?.(0x44ff44);
+        this.time.delayedCall(200, () => (player.sprite as any).clearTint?.());
+      }
+
+      // Subtle green screen tint for local player
+      if (playerId === this.sessionId) {
+        this.cameras.main.flash(200, 50, 200, 50);
+      }
+    });
+
     // --- Pickup sync ---
-    room.state.pickups.onAdd((pk: any, id: string) => {
+    $(room.state).pickups.onAdd((pk: any, id: string) => {
       if (!this.pickupEntities.has(id)) {
         const ent = new Pickup(this, id, pk.x, pk.y, pk.type);
         this.pickupEntities.set(id, ent);
       }
     });
-    room.state.pickups.onRemove((_pk: any, id: string) => {
+    $(room.state).pickups.onRemove((_pk: any, id: string) => {
       const ent = this.pickupEntities.get(id);
       if (ent) { ent.destroy(); this.pickupEntities.delete(id); }
     });
@@ -605,9 +659,16 @@ export class GameScene extends Phaser.Scene {
   private onPlayerAdd(p: any, sid: string) {
     const isLocal = sid === this.sessionId;
 
-    if (isLocal && this.localPlayer) return;
-    if (!isLocal && this.remotePlayers.has(sid)) return;
+    if (isLocal && this.localPlayer) {
+      console.log(`[GameScene] onPlayerAdd: skipping local player (already exists)`);
+      return;
+    }
+    if (!isLocal && this.remotePlayers.has(sid)) {
+      console.log(`[GameScene] onPlayerAdd: skipping remote ${sid} (already exists)`);
+      return;
+    }
 
+    console.log(`[GameScene] Creating ${isLocal ? "local" : "remote"} player entity for: ${p.name} (${sid}) at (${p.x}, ${p.y})`);
     const player = new Player(this, sid, p.name, p.x, p.y, isLocal);
     this.physics.add.collider(player.sprite, this.wallGroup);
 
@@ -618,6 +679,7 @@ export class GameScene extends Phaser.Scene {
       }
     } else {
       this.remotePlayers.set(sid, player);
+      console.log(`[GameScene] remotePlayers.size is now: ${this.remotePlayers.size}`);
     }
   }
 
@@ -748,6 +810,10 @@ export class GameScene extends Phaser.Scene {
       p.interpolate();
       p.update(delta);
     });
+    this.debugFrameCount++;
+    if (this.debugFrameCount % 60 === 0) {
+      console.log(`[GameScene] Interpolating ${this.remotePlayers.size} remote players`);
+    }
 
     // Update AI
     this.aiEntities.forEach((ai) => {
