@@ -37,4 +37,5 @@ export class PlayerSchema extends Schema {
   @type("string") reviverIds: string = "";
   @type("string") carriedBarrelId: string = "";
   @type("number") lastGrenadeAt: number = 0;
+  @type("string") inVehicleId: string = "";
 }

@@ -95,3 +95,13 @@ export interface BarrelDef {
   x: number;
   y: number;
 }
+
+export type VehicleType = "jeep" | "truck" | "tank";
+
+export interface VehicleDef {
+  id: string;
+  type: VehicleType;
+  x: number;
+  y: number;
+  rotation?: number;
+}

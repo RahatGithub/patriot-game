@@ -1,5 +1,5 @@
 import { getDamage, BARREL_CHAIN_DELAY_MS } from "@patriot/shared";
-import type { DamageSource } from "@patriot/shared";
+import type { DamageSource, DamageTarget } from "@patriot/shared";
 import type { PatriotRoom } from "../rooms/PatriotRoom.js";
 
 export interface AoEParams {
@@ -63,6 +63,21 @@ export function applyAoE(room: PatriotRoom, params: AoEParams) {
         if (!b.exploded) room.explodeBarrel(bId, params.attackerId);
       }, BARREL_CHAIN_DELAY_MS);
     }
+  });
+
+  // Damage vehicles
+  room.state.vehicles.forEach((v, vId) => {
+    if (v.destroyed) return;
+    const dx = v.x - params.x;
+    const dy = v.y - params.y;
+    const distSq = dx * dx + dy * dy;
+    if (distSq > radiusSq) return;
+    const falloff = 1.0 - Math.sqrt(distSq) / params.radius;
+    const target = v.type as DamageTarget;
+    const baseDmg = getDamage(params.source, target);
+    const dmg = Math.round(baseDmg * Math.max(0.4, falloff));
+    v.hp = Math.max(0, v.hp - dmg);
+    if (v.hp <= 0) room.destroyVehicle(v, vId, params.attackerId);
   });
 
   // Damage crates

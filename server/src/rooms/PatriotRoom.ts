@@ -35,6 +35,11 @@ import {
   GRENADE_AOE_RADIUS,
   GRENADE_COOLDOWN_MS,
   BAZOOKA_AOE_RADIUS,
+  VEHICLE_INTERACT_RANGE,
+  JEEP_HP,
+  JEEP_SPEED,
+  JEEP_ROTATION_SPEED,
+  JEEP_RADIUS,
 } from "@patriot/shared";
 import type { RankId } from "@patriot/shared";
 import type { InputCommand, WeaponId, DamageSource, MatchResult } from "@patriot/shared";
@@ -49,8 +54,10 @@ import { CheckpointSchema } from "./schema/CheckpointSchema.js";
 import { CrateSchema } from "./schema/CrateSchema.js";
 import { PickupSchema } from "./schema/PickupSchema.js";
 import { BarrelSchema } from "./schema/BarrelSchema.js";
+import { VehicleSchema } from "./schema/VehicleSchema.js";
 import { applyAoE } from "../systems/aoe.js";
 import type { AoEParams } from "../systems/aoe.js";
+import type { DamageTarget } from "@patriot/shared";
 
 export class PatriotRoom extends Room<RoomStateSchema> {
   maxClients = MAX_PLAYERS_PER_ROOM;
@@ -108,11 +115,13 @@ export class PatriotRoom extends Room<RoomStateSchema> {
       if (wep.ammo !== "unlimited" && player.ammo <= 0) return;
       if (wep.ammo !== "unlimited") player.ammo--;
 
-      // Spawn bullet
+      // Spawn bullet (use vehicle position if driving)
       const spreadAngle = data.aimAngle + (Math.random() - 0.5) * wep.spread;
       const spawnDist = 35;
-      const bx = player.x + Math.cos(data.aimAngle) * spawnDist;
-      const by = player.y + Math.sin(data.aimAngle) * spawnDist;
+      const originX = player.inVehicleId ? (this.state.vehicles.get(player.inVehicleId)?.x ?? player.x) : player.x;
+      const originY = player.inVehicleId ? (this.state.vehicles.get(player.inVehicleId)?.y ?? player.y) : player.y;
+      const bx = originX + Math.cos(data.aimAngle) * spawnDist;
+      const by = originY + Math.sin(data.aimAngle) * spawnDist;
 
       const bullet = new BulletSchema();
       bullet.id = `b${++this.bulletIdCounter}`;
@@ -177,7 +186,24 @@ export class PatriotRoom extends Room<RoomStateSchema> {
         return;
       }
 
-      // 4. Try loot pickup
+      // 4. Vehicle exit (if in one) or enter (if nearby)
+      if (player.inVehicleId) {
+        this.exitVehicle(player, client.sessionId);
+        return;
+      }
+      let nearestVehicle: VehicleSchema | null = null;
+      let nearestVehicleDist = VEHICLE_INTERACT_RANGE;
+      this.state.vehicles.forEach((v) => {
+        if (v.destroyed) return;
+        const d = Math.hypot(v.x - player.x, v.y - player.y);
+        if (d < nearestVehicleDist) { nearestVehicle = v; nearestVehicleDist = d; }
+      });
+      if (nearestVehicle) {
+        this.enterVehicle(player, client.sessionId, nearestVehicle);
+        return;
+      }
+
+      // 5. Try loot pickup
       let nearest: PickupSchema | null = null;
       let nearestDist = PICKUP_INTERACT_RANGE;
       let nearestId = "";
@@ -273,6 +299,7 @@ export class PatriotRoom extends Room<RoomStateSchema> {
     this.initializeCheckpoints();
     this.initializeCrates();
     this.initializeBarrels();
+    this.initializeVehicles();
     this.aiManager.spawnWave(1);
 
     console.log(`[Room ${this.state.code}] Match started (${totalMs / 1000}s)`);
@@ -474,6 +501,29 @@ export class PatriotRoom extends Room<RoomStateSchema> {
           }
         });
       }
+
+      // Vehicle hit detection
+      if (!hit) {
+        this.state.vehicles.forEach((vehicle, vId) => {
+          if (hit || vehicle.destroyed) return;
+          // Don't damage your own vehicle while inside it
+          if (vehicle.driverId === bullet.ownerId) return;
+          const dx = bullet.x - vehicle.x;
+          const dy = bullet.y - vehicle.y;
+          const r = JEEP_RADIUS + (wep?.bulletRadius ?? 4);
+          if (dx * dx + dy * dy < r * r) {
+            const target = vehicle.type as DamageTarget;
+            const dmg = wep ? getDamage(wep.damageSource, target) : 2;
+            vehicle.hp = Math.max(0, vehicle.hp - dmg);
+            this.broadcast("vehicleHit", { vehicleId: vId, x: vehicle.x, y: vehicle.y });
+            if (vehicle.hp <= 0) {
+              this.destroyVehicle(vehicle, vId, bullet.ownerId);
+            }
+            toRemove.push(id);
+            hit = true;
+          }
+        });
+      }
     });
     for (const id of toRemove) {
       this.state.bullets.delete(id);
@@ -623,6 +673,121 @@ export class PatriotRoom extends Room<RoomStateSchema> {
     console.log(`[Room ${this.state.code}] Initialized ${PATRIOT_MAP.barrels.length} barrels`);
   }
 
+  private initializeVehicles() {
+    PATRIOT_MAP.vehicles.forEach((def) => {
+      const v = new VehicleSchema();
+      v.id = def.id;
+      v.type = def.type;
+      v.x = def.x;
+      v.y = def.y;
+      v.rotation = def.rotation ?? 0;
+      v.hp = def.type === "jeep" ? JEEP_HP : def.type === "truck" ? 80 : 120;
+      this.state.vehicles.set(v.id, v);
+    });
+    console.log(`[Room ${this.state.code}] Initialized ${PATRIOT_MAP.vehicles.length} vehicles`);
+  }
+
+  private enterVehicle(player: PlayerSchema, sessionId: string, vehicle: VehicleSchema) {
+    if (player.carriedBarrelId) return;
+    if (vehicle.driverId) return;
+    vehicle.driverId = sessionId;
+    player.inVehicleId = vehicle.id;
+    player.x = vehicle.x;
+    player.y = vehicle.y;
+    this.broadcast("vehicleEntered", { vehicleId: vehicle.id, playerId: sessionId, role: "driver" });
+  }
+
+  private exitVehicle(player: PlayerSchema, sessionId: string) {
+    const vehicle = this.state.vehicles.get(player.inVehicleId);
+    if (!vehicle) {
+      player.inVehicleId = "";
+      return;
+    }
+    const angle = vehicle.rotation + Math.PI / 2;
+    const exitX = vehicle.x + Math.cos(angle) * 50;
+    const exitY = vehicle.y + Math.sin(angle) * 50;
+    player.x = checkWallCollision(exitX, exitY, PLAYER_RADIUS) ? vehicle.x : exitX;
+    player.y = checkWallCollision(exitX, exitY, PLAYER_RADIUS) ? vehicle.y : exitY;
+
+    if (vehicle.driverId === sessionId) vehicle.driverId = "";
+    player.inVehicleId = "";
+    this.broadcast("vehicleExited", { vehicleId: vehicle.id, playerId: sessionId });
+  }
+
+  private driveVehicle(vehicle: VehicleSchema, input: InputCommand, dt: number) {
+    let mx = input.moveX;
+    let my = input.moveY;
+    const mag = Math.sqrt(mx * mx + my * my);
+    if (mag > 1) { mx /= mag; my /= mag; }
+
+    const speed = JEEP_SPEED;
+    const targetVx = mx * speed;
+    const targetVy = my * speed;
+
+    vehicle.vx += (targetVx - vehicle.vx) * 0.1;
+    vehicle.vy += (targetVy - vehicle.vy) * 0.1;
+
+    const newX = vehicle.x + vehicle.vx * (dt / 1000);
+    const newY = vehicle.y + vehicle.vy * (dt / 1000);
+
+    if (!checkWallCollision(newX, newY, JEEP_RADIUS)) {
+      vehicle.x = newX;
+      vehicle.y = newY;
+    } else if (!checkWallCollision(newX, vehicle.y, JEEP_RADIUS)) {
+      vehicle.x = newX;
+      vehicle.vy *= 0.5;
+    } else if (!checkWallCollision(vehicle.x, newY, JEEP_RADIUS)) {
+      vehicle.y = newY;
+      vehicle.vx *= 0.5;
+    } else {
+      vehicle.vx = 0;
+      vehicle.vy = 0;
+    }
+
+    // Clamp to map
+    vehicle.x = Math.max(JEEP_RADIUS, Math.min(PATRIOT_MAP.width - JEEP_RADIUS, vehicle.x));
+    vehicle.y = Math.max(JEEP_RADIUS, Math.min(PATRIOT_MAP.height - JEEP_RADIUS, vehicle.y));
+
+    // Rotation follows velocity
+    if (Math.abs(vehicle.vx) > 5 || Math.abs(vehicle.vy) > 5) {
+      const targetRot = Math.atan2(vehicle.vy, vehicle.vx);
+      let diff = targetRot - vehicle.rotation;
+      while (diff > Math.PI) diff -= 2 * Math.PI;
+      while (diff < -Math.PI) diff += 2 * Math.PI;
+      vehicle.rotation += Math.sign(diff) * Math.min(Math.abs(diff), JEEP_ROTATION_SPEED * (dt / 1000));
+    }
+  }
+
+  destroyVehicle(vehicle: VehicleSchema, vId: string, killerId: string) {
+    if (vehicle.destroyed) return;
+    vehicle.destroyed = true;
+
+    // Eject driver with heavy damage
+    if (vehicle.driverId) {
+      const driver = this.state.players.get(vehicle.driverId);
+      if (driver) {
+        driver.inVehicleId = "";
+        driver.hp = Math.max(0, driver.hp - 50);
+        if (driver.hp <= 0) this.downPlayer(driver, vehicle.driverId, killerId);
+      }
+      vehicle.driverId = "";
+    }
+
+    // Small explosion
+    this.broadcast("explosion", { x: vehicle.x, y: vehicle.y, radius: 100, source: "barrel_explosion" });
+    applyAoE(this, {
+      source: "barrel_explosion",
+      x: vehicle.x,
+      y: vehicle.y,
+      radius: 100,
+      attackerId: killerId,
+      attackerFaction: this.attackerFactionOf(killerId),
+      ignoreFriendlyFire: true,
+    });
+
+    this.clock.setTimeout(() => this.state.vehicles.delete(vId), 3000);
+  }
+
   explodeBarrel(barrelId: string, attackerId: string) {
     const barrel = this.state.barrels.get(barrelId);
     if (!barrel || barrel.exploded) return;
@@ -766,6 +931,8 @@ export class PatriotRoom extends Room<RoomStateSchema> {
   }
 
   private downPlayer(p: PlayerSchema, id: string, attackerId: string) {
+    // Exit vehicle before going down
+    if (p.inVehicleId) this.exitVehicle(p, id);
     // Drop carried barrel before going down
     if (p.carriedBarrelId) this.dropBarrel(p, id);
 
@@ -1124,6 +1291,20 @@ export class PatriotRoom extends Room<RoomStateSchema> {
   }
 
   private applyInput(player: PlayerSchema, input: InputCommand, dt: number) {
+    // If driving a vehicle, apply to vehicle instead
+    if (player.inVehicleId) {
+      const vehicle = this.state.vehicles.get(player.inVehicleId);
+      if (vehicle && vehicle.driverId === player.id) {
+        this.driveVehicle(vehicle, input, dt);
+      }
+      if (vehicle && !vehicle.destroyed) {
+        player.x = vehicle.x;
+        player.y = vehicle.y;
+      }
+      player.aimAngle = input.aimAngle;
+      return;
+    }
+
     // Normalize & clamp input
     let mx = input.moveX;
     let my = input.moveY;
@@ -1239,8 +1420,9 @@ export class PatriotRoom extends Room<RoomStateSchema> {
       // Reconnection failed or consented leave
     }
 
-    // Drop carried barrel before removing player
+    // Exit vehicle / drop barrel before removing player
     const leavingPlayer = this.state.players.get(client.sessionId);
+    if (leavingPlayer?.inVehicleId) this.exitVehicle(leavingPlayer, client.sessionId);
     if (leavingPlayer?.carriedBarrelId) this.dropBarrel(leavingPlayer, client.sessionId);
 
     const wasCreator = client.sessionId === this.state.creatorId;

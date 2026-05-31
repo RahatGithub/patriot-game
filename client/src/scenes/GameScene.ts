@@ -21,11 +21,12 @@ import { AIEntity } from "../entities/AIEntity.js";
 import { CheckpointFlag } from "../entities/CheckpointFlag.js";
 import { Crate } from "../entities/Crate.js";
 import { Barrel } from "../entities/Barrel.js";
+import { Vehicle } from "../entities/Vehicle.js";
 import { Pickup } from "../entities/Pickup.js";
 import { Explosion } from "../effects/Explosion.js";
 import { getStateCallbacks } from "colyseus.js";
 import { PickupPromptUI } from "../ui/PickupPromptUI.js";
-import { PICKUP_INTERACT_RANGE, canUseWeapon, REVIVE_RANGE, BARREL_PICKUP_RANGE, BARREL_CARRY_OFFSET_Y } from "@patriot/shared";
+import { PICKUP_INTERACT_RANGE, canUseWeapon, REVIVE_RANGE, BARREL_PICKUP_RANGE, BARREL_CARRY_OFFSET_Y, VEHICLE_INTERACT_RANGE } from "@patriot/shared";
 import type { RankId, WeaponId } from "@patriot/shared";
 
 const FREE_CAM_SPEED = 600;
@@ -81,6 +82,11 @@ export class GameScene extends Phaser.Scene {
   private showAoEDebug = false;
   private barrelCarryHud: HTMLElement | null = null;
   private barrelPromptEl: HTMLElement | null = null;
+
+  // Vehicles
+  private vehicleEntities = new Map<string, Vehicle>();
+  private vehiclePromptEl: HTMLElement | null = null;
+  private vehicleHud: HTMLElement | null = null;
 
   constructor() {
     super("GameScene");
@@ -303,6 +309,12 @@ export class GameScene extends Phaser.Scene {
       this.barrelCarryHud = null;
       this.barrelPromptEl?.remove();
       this.barrelPromptEl = null;
+      this.vehicleEntities.forEach((v) => v.destroy());
+      this.vehicleEntities.clear();
+      this.vehiclePromptEl?.remove();
+      this.vehiclePromptEl = null;
+      this.vehicleHud?.remove();
+      this.vehicleHud = null;
       this.pickupEntities.forEach((p) => p.destroy());
       this.pickupEntities.clear();
       this.pickupPrompt.hide();
@@ -700,6 +712,55 @@ export class GameScene extends Phaser.Scene {
       }
     });
 
+    // --- Vehicle sync ---
+    $(room.state).vehicles.onAdd((v: any, id: string) => {
+      if (!this.vehicleEntities.has(id)) {
+        const ent = new Vehicle(this, id, v.type, v.x, v.y, v.rotation);
+        this.vehicleEntities.set(id, ent);
+      }
+    });
+    $(room.state).vehicles.onRemove((_v: any, id: string) => {
+      const ent = this.vehicleEntities.get(id);
+      if (ent) { ent.destroy(); this.vehicleEntities.delete(id); }
+    });
+
+    // Vehicle state updates
+    room.onStateChange(() => {
+      (room.state as any).vehicles?.forEach((v: any, id: string) => {
+        const ent = this.vehicleEntities.get(id);
+        if (!ent) return;
+        ent.pushSnapshot(v.x, v.y, v.rotation);
+        ent.setHp(v.hp);
+        ent.driverId = v.driverId || "";
+        if (v.destroyed && !ent.destroyed) ent.setDestroyed();
+      });
+
+      // Hide/show player sprites when in/out of vehicles
+      (room.state as any).players?.forEach((p: any, sid: string) => {
+        const player = sid === this.sessionId ? this.localPlayer : this.remotePlayers.get(sid);
+        if (player) {
+          player.sprite.setVisible(!p.inVehicleId);
+        }
+      });
+    });
+
+    room.onMessage("vehicleHit", (data: any) => {
+      const ent = this.vehicleEntities.get(data.vehicleId);
+      if (ent) ent.flashHit();
+    });
+
+    room.onMessage("vehicleEntered", (data: any) => {
+      if (data.playerId === this.sessionId) {
+        this.showVehicleHud();
+      }
+    });
+
+    room.onMessage("vehicleExited", (data: any) => {
+      if (data.playerId === this.sessionId) {
+        this.hideVehicleHud();
+      }
+    });
+
     // Cure used effect
     room.onMessage("cureUsed", (data: any) => {
       const { playerId, x, y } = data;
@@ -1032,6 +1093,10 @@ export class GameScene extends Phaser.Scene {
     // Update barrel bob animation (for carried barrels)
     this.barrelEntities.forEach((b) => b.update(delta));
     this.updateBarrelPrompt();
+
+    // Update vehicles
+    this.vehicleEntities.forEach((v) => v.interpolate());
+    this.updateVehiclePrompt();
   }
 
   private toggleGrid() {
@@ -1423,6 +1488,78 @@ export class GameScene extends Phaser.Scene {
       el.style.opacity = "0";
       setTimeout(() => el.remove(), 500);
     }, 2000);
+  }
+
+  private showVehicleHud() {
+    if (this.vehicleHud) return;
+    const el = document.createElement("div");
+    el.id = "vehicle-hud";
+    el.style.cssText = `
+      position:fixed; bottom:80px; left:50%; transform:translateX(-50%);
+      background:rgba(0,0,0,0.85); border:2px solid #4a7a3a; border-radius:6px;
+      padding:6px 16px; color:#88cc66; font-family:monospace; font-size:13px;
+      z-index:1000; pointer-events:none; white-space:nowrap;
+    `;
+    el.textContent = "DRIVING: JEEP \u2014 Press E to exit";
+    document.body.appendChild(el);
+    this.vehicleHud = el;
+  }
+
+  private hideVehicleHud() {
+    this.vehicleHud?.remove();
+    this.vehicleHud = null;
+  }
+
+  private updateVehiclePrompt() {
+    if (!this.localPlayer || this.matchEnded) {
+      this.hideVehiclePrompt();
+      return;
+    }
+
+    const room = this.networkManager?.getRoom();
+    if (!room) { this.hideVehiclePrompt(); return; }
+
+    const localState = (room.state as any).players?.get(this.sessionId);
+    if (!localState || localState.isDowned || localState.isDead) { this.hideVehiclePrompt(); return; }
+    if (localState.inVehicleId || localState.carriedBarrelId) { this.hideVehiclePrompt(); return; }
+
+    let closestDist = VEHICLE_INTERACT_RANGE;
+    let closestVehicle: any = null;
+    (room.state as any).vehicles?.forEach((v: any) => {
+      if (v.destroyed || v.driverId) return;
+      const dx = this.localPlayer!.sprite.x - v.x;
+      const dy = this.localPlayer!.sprite.y - v.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < closestDist) { closestDist = dist; closestVehicle = v; }
+    });
+
+    if (closestVehicle) {
+      const cam = this.cameras.main;
+      const sx = (closestVehicle.x - cam.scrollX) * cam.zoom;
+      const sy = (closestVehicle.y - cam.scrollY) * cam.zoom;
+      if (!this.vehiclePromptEl) {
+        const el = document.createElement("div");
+        el.id = "vehicle-prompt";
+        el.style.cssText = `
+          position:fixed; transform:translateX(-50%);
+          background:rgba(0,0,0,0.85); border:2px solid #4a7a3a; border-radius:6px;
+          padding:4px 12px; color:#88cc66; font-family:monospace; font-size:11px;
+          z-index:1000; pointer-events:none; white-space:nowrap;
+        `;
+        el.textContent = "Press E to enter Jeep";
+        document.body.appendChild(el);
+        this.vehiclePromptEl = el;
+      }
+      this.vehiclePromptEl.style.left = `${sx}px`;
+      this.vehiclePromptEl.style.top = `${sy - 50}px`;
+    } else {
+      this.hideVehiclePrompt();
+    }
+  }
+
+  private hideVehiclePrompt() {
+    this.vehiclePromptEl?.remove();
+    this.vehiclePromptEl = null;
   }
 
   private showBarrelCarryHud() {

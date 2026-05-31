@@ -53,7 +53,7 @@ export interface SpawnZone {
   height: number;
 }
 
-import type { PatrolPath, AISpawnDef, CrateDef, BarrelDef } from "./types.js";
+import type { PatrolPath, AISpawnDef, CrateDef, BarrelDef, VehicleDef } from "./types.js";
 
 export interface MapDefinition {
   width: number;
@@ -68,6 +68,7 @@ export interface MapDefinition {
   initialAISpawns: AISpawnDef[];
   crates: CrateDef[];
   barrels: BarrelDef[];
+  vehicles: VehicleDef[];
 }
 
 export const PATRIOT_MAP: MapDefinition = {
@@ -289,5 +290,10 @@ export const PATRIOT_MAP: MapDefinition = {
     { id: "barrel_11", x: 3200, y: 2300 },
     { id: "barrel_12", x: 3500, y: 2600 },
     { id: "barrel_13", x: 3520, y: 2630 }, // chain cluster with barrel_12
+  ],
+
+  vehicles: [
+    { id: "jeep_1", type: "jeep", x: 400, y: 1400, rotation: 0 },
+    { id: "jeep_2", type: "jeep", x: 1800, y: 1100, rotation: Math.PI / 2 },
   ],
 };
