@@ -178,11 +178,13 @@ export class PatriotRoom extends Room<RoomStateSchema> {
       }
       // Player hit detection
       let hit = false;
+      const isAIBullet = bullet.ownerId.startsWith("ai_");
       this.state.players.forEach((target, targetId) => {
         if (hit) return;
         if (targetId === bullet.ownerId) return;
         if (target.isDowned || target.isDead) return;
-        if (!this.allowFriendlyFire) return;
+        // AI bullets damage humans; human bullets don't damage humans (friendly fire off)
+        if (!isAIBullet && !this.allowFriendlyFire) return;
 
         const dx = bullet.x - target.x;
         const dy = bullet.y - target.y;

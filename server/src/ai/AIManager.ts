@@ -1,6 +1,7 @@
 import {
   PATRIOT_MAP,
   AI_WALK_SPEED,
+  AI_RUN_SPEED,
   AI_RADIUS,
   AI_INITIAL_HP,
   AI_VISION_RANGE,
@@ -10,21 +11,29 @@ import {
   AI_SOUND_RANGE,
   AI_ALERT_DURATION_MS,
   AI_ALERT_TURN_SPEED,
+  AI_CHASE_LOSE_TARGET_MS,
+  AI_SHOOT_RANGE,
+  AI_SHOOT_AIM_VARIATION,
+  AI_FIRE_REACTION_DELAY_MS,
+  AI_CHASE_DESIRED_DISTANCE,
+  WEAPONS,
 } from "@patriot/shared";
+import type { WeaponId } from "@patriot/shared";
 import { AISchema } from "../rooms/schema/AISchema.js";
+import { BulletSchema } from "../rooms/schema/BulletSchema.js";
 import type { PlayerSchema } from "../rooms/schema/PlayerSchema.js";
 import { checkWallCollision } from "../systems/collision.js";
 import { segmentIntersectsRect } from "../systems/geometry.js";
 import type { RoomStateSchema } from "../rooms/schema/RoomStateSchema.js";
 
 let aiIdCounter = 0;
+let bulletCounter = 0;
 
 function lerpAngle(from: number, to: number, maxStep: number): number {
   let diff = to - from;
   while (diff > Math.PI) diff -= 2 * Math.PI;
   while (diff < -Math.PI) diff += 2 * Math.PI;
-  const step = Math.sign(diff) * Math.min(Math.abs(diff), maxStep);
-  return from + step;
+  return from + Math.sign(diff) * Math.min(Math.abs(diff), maxStep);
 }
 
 export class AIManager {
@@ -41,7 +50,6 @@ export class AIManager {
     for (const def of PATRIOT_MAP.initialAISpawns) {
       const sp = PATRIOT_MAP.enemySpawnPoints[def.spawnPointIndex];
       if (!sp) continue;
-
       const ai = new AISchema();
       ai.id = `ai_${++aiIdCounter}`;
       ai.x = sp.x;
@@ -49,21 +57,14 @@ export class AIManager {
       ai.weapon = def.weapon;
       ai.patrolPathId = def.patrolPathId;
       ai.hp = AI_INITIAL_HP;
-      ai.currentWaypointIdx = 0;
-      ai.patrolDirection = 1;
-
       this.state.ai.set(ai.id, ai);
     }
   }
 
-  /** Called when a gunshot occurs — alert nearby AI */
   broadcastSound(x: number, y: number) {
     this.state.ai.forEach((ai) => {
-      if (ai.isDead) return;
-      if (ai.behaviorState === "chase") return; // chasing AI ignores noise
-
-      const dist = Math.hypot(x - ai.x, y - ai.y);
-      if (dist <= AI_SOUND_RANGE) {
+      if (ai.isDead || ai.behaviorState === "chase") return;
+      if (Math.hypot(x - ai.x, y - ai.y) <= AI_SOUND_RANGE) {
         this.enterAlertState(ai, x, y);
       }
     });
@@ -77,31 +78,23 @@ export class AIManager {
 
     this.state.ai.forEach((ai, id) => {
       if (ai.isDead) {
-        if (ai.deathTime > 0 && now - ai.deathTime > 5000) {
-          toRemove.push(id);
-        }
+        if (ai.deathTime > 0 && now - ai.deathTime > 5000) toRemove.push(id);
         return;
       }
-
-      if (doSight) {
+      if (doSight && ai.behaviorState !== "chase") {
         this.checkSight(ai);
       }
-
       switch (ai.behaviorState) {
-        case "patrol":
-          this.updatePatrol(ai, deltaTime);
-          break;
-        case "alert":
-          this.updateAlert(ai, deltaTime);
-          break;
-        // chase — Prompt 15
+        case "patrol": this.updatePatrol(ai, deltaTime); break;
+        case "alert": this.updateAlert(ai, deltaTime); break;
+        case "chase": this.updateChase(ai, deltaTime); break;
       }
     });
 
-    for (const id of toRemove) {
-      this.state.ai.delete(id);
-    }
+    for (const id of toRemove) this.state.ai.delete(id);
   }
+
+  // --- State transitions ---
 
   private checkSight(ai: AISchema): PlayerSchema | null {
     const spotted = this.findVisiblePlayer(ai);
@@ -119,64 +112,159 @@ export class AIManager {
     ai.targetX = x;
     ai.targetY = y;
     if (targetId) ai.alertTargetId = targetId;
-
-    if (wasPatrol) {
-      console.log(`[Room ${this.roomCode}] Mafia ${ai.id} alerted`);
-    }
+    if (wasPatrol) console.log(`[Room ${this.roomCode}] Mafia ${ai.id} alerted`);
   }
 
-  private updateAlert(ai: AISchema, dt: number) {
-    // Face the stimulus
-    const dx = ai.targetX - ai.x;
-    const dy = ai.targetY - ai.y;
-    const desired = Math.atan2(dy, dx);
-    ai.aimAngle = lerpAngle(ai.aimAngle, desired, AI_ALERT_TURN_SPEED * (dt / 1000));
+  private enterChaseState(ai: AISchema, target: PlayerSchema) {
+    ai.behaviorState = "chase";
+    ai.alertTargetId = target.id;
+    ai.targetX = target.x;
+    ai.targetY = target.y;
+    ai.chaseStartedAt = Date.now();
+    ai.lastSawTargetAt = Date.now();
+    ai.lastFireAt = Date.now(); // reaction delay starts
+    console.log(`[Room ${this.roomCode}] Mafia ${ai.id} chasing ${target.name}`);
+  }
 
-    // Check sight (with extended range from alert state)
-    const spotted = this.findVisiblePlayer(ai);
-    if (spotted) {
-      ai.targetX = spotted.x;
-      ai.targetY = spotted.y;
-      ai.alertTargetId = spotted.id;
-      ai.alertStartedAt = Date.now();
-      // Prompt 15 will transition to chase here
-      return;
-    }
-
-    // Timer expired → return to patrol
-    if (Date.now() - ai.alertStartedAt > AI_ALERT_DURATION_MS) {
-      this.returnToPatrol(ai);
-    }
+  private loseTargetThenPatrol(ai: AISchema) {
+    // Go to alert briefly, then naturally decay to patrol
+    ai.behaviorState = "alert";
+    ai.alertStartedAt = Date.now();
   }
 
   private returnToPatrol(ai: AISchema) {
     ai.behaviorState = "patrol";
     ai.alertTargetId = "";
-
-    // Find nearest waypoint
     const path = PATRIOT_MAP.patrolPaths.find((p) => p.id === ai.patrolPathId);
     if (path) {
       let nearestIdx = 0;
       let nearestDist = Infinity;
       path.waypoints.forEach((wp, i) => {
         const d = Math.hypot(wp.x - ai.x, wp.y - ai.y);
-        if (d < nearestDist) {
-          nearestDist = d;
-          nearestIdx = i;
-        }
+        if (d < nearestDist) { nearestDist = d; nearestIdx = i; }
       });
       ai.currentWaypointIdx = nearestIdx;
     }
+  }
 
-    console.log(`[Room ${this.roomCode}] Mafia ${ai.id} returned to patrol`);
+  // --- Behavior updates ---
+
+  private updateAlert(ai: AISchema, dt: number) {
+    const dx = ai.targetX - ai.x;
+    const dy = ai.targetY - ai.y;
+    ai.aimAngle = lerpAngle(ai.aimAngle, Math.atan2(dy, dx), AI_ALERT_TURN_SPEED * (dt / 1000));
+
+    const spotted = this.findVisiblePlayer(ai);
+    if (spotted) {
+      this.enterChaseState(ai, spotted);
+      return;
+    }
+
+    if (Date.now() - ai.alertStartedAt > AI_ALERT_DURATION_MS) {
+      this.returnToPatrol(ai);
+    }
+  }
+
+  private updateChase(ai: AISchema, dt: number) {
+    const target = this.state.players.get(ai.alertTargetId);
+    if (!target || target.isDowned || target.isDead) {
+      return this.loseTargetThenPatrol(ai);
+    }
+
+    const stillVisible = this.canSeePlayer(ai, target);
+    if (stillVisible) {
+      ai.targetX = target.x;
+      ai.targetY = target.y;
+      ai.lastSawTargetAt = Date.now();
+    } else if (Date.now() - ai.lastSawTargetAt > AI_CHASE_LOSE_TARGET_MS) {
+      return this.loseTargetThenPatrol(ai);
+    }
+
+    const dx = ai.targetX - ai.x;
+    const dy = ai.targetY - ai.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const aimAngle = Math.atan2(dy, dx);
+    ai.aimAngle = lerpAngle(ai.aimAngle, aimAngle, AI_ALERT_TURN_SPEED * 2 * (dt / 1000));
+
+    // Movement
+    if (dist > AI_CHASE_DESIRED_DISTANCE) {
+      this.tryMoveAI(ai, (dx / dist) * AI_RUN_SPEED, (dy / dist) * AI_RUN_SPEED, dt);
+    } else if (dist < AI_CHASE_DESIRED_DISTANCE * 0.6) {
+      this.tryMoveAI(ai, -(dx / dist) * AI_WALK_SPEED, -(dy / dist) * AI_WALK_SPEED, dt);
+    }
+
+    // Shooting
+    if (stillVisible && dist <= AI_SHOOT_RANGE) {
+      this.tryAIShoot(ai);
+    }
+  }
+
+  private tryMoveAI(ai: AISchema, vx: number, vy: number, dt: number) {
+    const nx = ai.x + vx * (dt / 1000);
+    const ny = ai.y + vy * (dt / 1000);
+
+    if (!checkWallCollision(nx, ny, AI_RADIUS)) { ai.x = nx; ai.y = ny; return; }
+    if (!checkWallCollision(nx, ai.y, AI_RADIUS)) { ai.x = nx; return; }
+    if (!checkWallCollision(ai.x, ny, AI_RADIUS)) { ai.y = ny; return; }
+
+    // Sidestep
+    const perp = Math.atan2(vy, vx) + Math.PI / 2;
+    const ox = Math.cos(perp) * 10;
+    const oy = Math.sin(perp) * 10;
+    if (!checkWallCollision(ai.x + ox, ai.y + oy, AI_RADIUS)) {
+      ai.x += ox;
+      ai.y += oy;
+    }
+  }
+
+  private tryAIShoot(ai: AISchema) {
+    const now = Date.now();
+    const wep = WEAPONS[ai.weapon as WeaponId];
+    if (!wep) return;
+
+    if (now - ai.chaseStartedAt < AI_FIRE_REACTION_DELAY_MS) return;
+    if (now - ai.lastFireAt < 1000 / wep.fireRatePerSec) return;
+
+    const spread = (Math.random() * 2 - 1) * (wep.spread + AI_SHOOT_AIM_VARIATION) / 2;
+    const aimWithSpread = ai.aimAngle + spread;
+
+    const bullet = new BulletSchema();
+    bullet.id = `ab${++bulletCounter}`;
+    bullet.ownerId = ai.id; // already starts with 'ai_'
+    bullet.weaponId = ai.weapon;
+    bullet.x = ai.x + Math.cos(ai.aimAngle) * 30;
+    bullet.y = ai.y + Math.sin(ai.aimAngle) * 30;
+    bullet.vx = Math.cos(aimWithSpread) * wep.bulletSpeed;
+    bullet.vy = Math.sin(aimWithSpread) * wep.bulletSpeed;
+    bullet.spawnedAt = now;
+    this.state.bullets.set(bullet.id, bullet);
+
+    ai.lastFireAt = now;
+    this.broadcastSound(ai.x, ai.y);
+  }
+
+  // --- Vision helpers ---
+
+  canSeePlayer(ai: AISchema, player: PlayerSchema): boolean {
+    if (player.isDowned || player.isDead) return false;
+    const dx = player.x - ai.x;
+    const dy = player.y - ai.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const range = AI_VISION_RANGE * (ai.behaviorState === "patrol" ? 1 : AI_VISION_ALERT_RANGE_MULT);
+    if (dist > range) return false;
+
+    const angle = Math.atan2(dy, dx);
+    let diff = angle - ai.aimAngle;
+    while (diff > Math.PI) diff -= 2 * Math.PI;
+    while (diff < -Math.PI) diff += 2 * Math.PI;
+    if (Math.abs(diff) > AI_VISION_ARC / 2) return false;
+
+    return this.hasLineOfSight(ai.x, ai.y, player.x, player.y);
   }
 
   findVisiblePlayer(ai: AISchema): PlayerSchema | null {
-    const range =
-      AI_VISION_RANGE *
-      (ai.behaviorState === "patrol" ? 1 : AI_VISION_ALERT_RANGE_MULT);
+    const range = AI_VISION_RANGE * (ai.behaviorState === "patrol" ? 1 : AI_VISION_ALERT_RANGE_MULT);
     const halfArc = AI_VISION_ARC / 2;
-
     let closest: PlayerSchema | null = null;
     let closestDist = range + 1;
 
@@ -187,20 +275,15 @@ export class AIManager {
       const dist = Math.sqrt(dx * dx + dy * dy);
       if (dist > range) return;
 
-      const angleToPlayer = Math.atan2(dy, dx);
-      let diff = angleToPlayer - ai.aimAngle;
+      const angle = Math.atan2(dy, dx);
+      let diff = angle - ai.aimAngle;
       while (diff > Math.PI) diff -= 2 * Math.PI;
       while (diff < -Math.PI) diff += 2 * Math.PI;
       if (Math.abs(diff) > halfArc) return;
-
       if (!this.hasLineOfSight(ai.x, ai.y, player.x, player.y)) return;
 
-      if (dist < closestDist) {
-        closest = player;
-        closestDist = dist;
-      }
+      if (dist < closestDist) { closest = player; closestDist = dist; }
     });
-
     return closest;
   }
 
@@ -210,6 +293,8 @@ export class AIManager {
     }
     return true;
   }
+
+  // --- Patrol ---
 
   private updatePatrol(ai: AISchema, dt: number) {
     const path = PATRIOT_MAP.patrolPaths.find((p) => p.id === ai.patrolPathId);
@@ -228,11 +313,9 @@ export class AIManager {
       } else {
         ai.currentWaypointIdx += ai.patrolDirection;
         if (ai.currentWaypointIdx >= path.waypoints.length) {
-          ai.currentWaypointIdx = path.waypoints.length - 2;
-          ai.patrolDirection = -1;
+          ai.currentWaypointIdx = path.waypoints.length - 2; ai.patrolDirection = -1;
         } else if (ai.currentWaypointIdx < 0) {
-          ai.currentWaypointIdx = 1;
-          ai.patrolDirection = 1;
+          ai.currentWaypointIdx = 1; ai.patrolDirection = 1;
         }
       }
       return;
@@ -243,8 +326,7 @@ export class AIManager {
     const ny = ai.y + (dy / dist) * step;
 
     if (!checkWallCollision(nx, ny, AI_RADIUS)) {
-      ai.x = nx;
-      ai.y = ny;
+      ai.x = nx; ai.y = ny;
     } else {
       if (path.loop) {
         ai.currentWaypointIdx = (ai.currentWaypointIdx + 1) % path.waypoints.length;
@@ -252,7 +334,6 @@ export class AIManager {
         ai.currentWaypointIdx += ai.patrolDirection;
       }
     }
-
     ai.aimAngle = Math.atan2(dy, dx);
   }
 }

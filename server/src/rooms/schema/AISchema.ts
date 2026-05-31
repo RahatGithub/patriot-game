@@ -21,4 +21,7 @@ export class AISchema extends Schema {
   @type("number") targetX: number = 0;
   @type("number") targetY: number = 0;
   @type("string") alertTargetId: string = "";
+  @type("number") chaseStartedAt: number = 0;
+  @type("number") lastSawTargetAt: number = 0;
+  @type("number") lastFireAt: number = 0;
 }
