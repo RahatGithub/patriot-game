@@ -55,7 +55,10 @@ export class GameScene extends Phaser.Scene {
   private captureBarLabel: Phaser.GameObjects.Text | null = null;
   private captureNotification: Phaser.GameObjects.Text | null = null;
   private respawnNotification: Phaser.GameObjects.Text | null = null;
+  private waveNotification: Phaser.GameObjects.Text | null = null;
   private localPlayerWasDead = false;
+  private matchEnded = false;
+  private lastWaveCount = 0;
 
   constructor() {
     super("GameScene");
@@ -232,6 +235,20 @@ export class GameScene extends Phaser.Scene {
         fontStyle: "bold",
         stroke: "#000",
         strokeThickness: 3,
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(200)
+      .setVisible(false);
+
+    // Wave notification
+    this.waveNotification = this.add
+      .text(0, 0, "", {
+        fontSize: "30px",
+        color: "#ff8844",
+        fontStyle: "bold",
+        stroke: "#000",
+        strokeThickness: 4,
       })
       .setOrigin(0.5)
       .setScrollFactor(0)
@@ -499,6 +516,25 @@ export class GameScene extends Phaser.Scene {
       // Celebration overlay
       this.showCaptureNotification(order);
     });
+
+    // Match ended
+    room.onMessage("MATCH_ENDED", (data: any) => {
+      this.matchEnded = true;
+      this.game.events.emit("matchEnded", { result: data.result });
+    });
+
+    // Wave detection: watch totalAISpawned changes for wave announcements
+    let prevSpawned = 0;
+    room.onStateChange(() => {
+      const s = room.state as any;
+      const spawned = s.totalAISpawned ?? 0;
+      if (spawned > prevSpawned && prevSpawned > 0) {
+        // A new wave happened — figure out wave number from capturedCount
+        const waveNum = (s.capturedCount ?? 0) + 1;
+        this.showWaveNotification(waveNum);
+      }
+      prevSpawned = spawned;
+    });
   }
 
   private onPlayerAdd(p: any, sid: string) {
@@ -592,7 +628,7 @@ export class GameScene extends Phaser.Scene {
       if (this.freeCamKeys.D.isDown) cam.scrollX += spd;
       if (this.freeCamKeys.W.isDown) cam.scrollY -= spd;
       if (this.freeCamKeys.S.isDown) cam.scrollY += spd;
-    } else if (this.localPlayer && this.networkManager && !this.localPlayer.isDowned) {
+    } else if (this.localPlayer && this.networkManager && !this.localPlayer.isDowned && !this.matchEnded) {
       const im = this.inputManager;
       const body = this.localPlayer.sprite.body as Phaser.Physics.Arcade.Body;
 
@@ -846,6 +882,24 @@ export class GameScene extends Phaser.Scene {
       delay: 1500,
       duration: 500,
       onComplete: () => this.respawnNotification?.setVisible(false),
+    });
+  }
+
+  private showWaveNotification(waveNumber: number) {
+    if (!this.waveNotification) return;
+    const cam = this.cameras.main;
+    this.waveNotification
+      .setText(`WAVE ${waveNumber}!`)
+      .setPosition(cam.width / 2, 120)
+      .setAlpha(1)
+      .setVisible(true);
+
+    this.tweens.add({
+      targets: this.waveNotification,
+      alpha: 0,
+      delay: 1500,
+      duration: 500,
+      onComplete: () => this.waveNotification?.setVisible(false),
     });
   }
 }

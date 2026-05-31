@@ -4,6 +4,7 @@ import { JoinRoomScreen } from "./screens/JoinRoomScreen.js";
 import { LobbyScreen } from "./screens/LobbyScreen.js";
 import { MatchStartingScreen } from "./screens/MatchStartingScreen.js";
 import { DeviceSelectScreen } from "./screens/DeviceSelectScreen.js";
+import { MatchEndScreen } from "./screens/MatchEndScreen.js";
 import type { NetworkManager } from "../network/NetworkManager.js";
 import type { DeviceProfile } from "../utils/deviceProfile.js";
 import type Phaser from "phaser";
@@ -84,6 +85,8 @@ export class ScreenManager {
         return new MatchStartingScreen();
       case "deviceSelect":
         return new DeviceSelectScreen();
+      case "matchEnd":
+        return new MatchEndScreen();
       default:
         throw new Error(`Unknown screen: ${name}`);
     }

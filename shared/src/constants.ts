@@ -29,3 +29,7 @@ export const AI_FIRE_REACTION_DELAY_MS = 300;
 export const AI_CHASE_DESIRED_DISTANCE = 200;
 export const CHECKPOINT_CAPTURE_TIME_MS = 5000;
 export const CHECKPOINT_RADIUS = 100;
+export const MATCH_TIME_PER_CHECKPOINT_MS = 2 * 60 * 1000;
+export const WAVE_BASE_COUNT = 5;
+export const WAVE_SCALING_FACTOR = 1.5;
+export const WAVE_MAX_AI_ALIVE = 30;

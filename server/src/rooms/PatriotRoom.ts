@@ -15,8 +15,9 @@ import {
   DOWNED_TIMEOUT_MS,
   AI_RADIUS,
   CHECKPOINT_CAPTURE_TIME_MS,
+  MATCH_TIME_PER_CHECKPOINT_MS,
 } from "@patriot/shared";
-import type { InputCommand, WeaponId, DamageSource } from "@patriot/shared";
+import type { InputCommand, WeaponId, DamageSource, MatchResult } from "@patriot/shared";
 import { RoomStateSchema } from "./schema/RoomStateSchema.js";
 import { PlayerSchema } from "./schema/PlayerSchema.js";
 import { BulletSchema } from "./schema/BulletSchema.js";
@@ -66,6 +67,7 @@ export class PatriotRoom extends Room<RoomStateSchema> {
 
     // Fire handler
     this.onMessage("fire", (client, data: { aimAngle: number }) => {
+      if (this.state.matchState !== "in_progress") return;
       const player = this.state.players.get(client.sessionId);
       if (!player || player.isDowned || player.isDead) return;
 
@@ -133,17 +135,47 @@ export class PatriotRoom extends Room<RoomStateSchema> {
       }
 
       this.state.matchStarted = true;
+      this.state.matchState = "starting";
       this.broadcast(ServerMessage.MATCH_STARTED);
-      this.aiManager.spawnInitial();
-      this.initializeCheckpoints();
-      console.log(`[Room ${this.state.code}] Match started`);
+
+      // 2-second delay before match goes live
+      this.clock.setTimeout(() => {
+        this.startMatch();
+      }, 2000);
     });
 
     console.log(`[Room] Created room ${code} with ${checkpointCount} checkpoints`);
   }
 
+  private startMatch() {
+    this.state.matchState = "in_progress";
+    this.state.matchStartedAt = Date.now();
+    const totalMs = this.state.checkpointCount * MATCH_TIME_PER_CHECKPOINT_MS;
+    this.state.matchEndsAt = Date.now() + totalMs;
+    this.state.timeRemainingMs = totalMs;
+
+    this.initializeCheckpoints();
+    this.aiManager.spawnWave(1);
+
+    console.log(`[Room ${this.state.code}] Match started (${totalMs / 1000}s)`);
+  }
+
   private tick(deltaTime: number) {
-    if (!this.state.matchStarted) return;
+    if (this.state.matchState !== "in_progress") return;
+
+    // Update timer
+    this.state.timeRemainingMs = Math.max(0, this.state.matchEndsAt - Date.now());
+
+    // Check end conditions (precedence: wipe > timeout > win)
+    if (this.allHumansDead()) {
+      return this.endMatch("lose_wipe");
+    }
+    if (this.state.timeRemainingMs <= 0) {
+      return this.endMatch("lose_timeout");
+    }
+    if (this.allCheckpointsCaptured()) {
+      return this.endMatch("win");
+    }
 
     this.state.players.forEach((player, sessionId) => {
       const inputs = this.playerInputs.get(sessionId);
@@ -312,7 +344,43 @@ export class PatriotRoom extends Room<RoomStateSchema> {
       }
     });
 
+    // Spawn next wave
+    this.aiManager.spawnWave(cp.order + 1);
+
     console.log(`[Room ${this.state.code}] Checkpoint ${cp.order} captured`);
+  }
+
+  private endMatch(result: NonNullable<MatchResult>) {
+    this.state.matchState = "ended";
+    this.state.matchResult = result;
+    this.broadcast("MATCH_ENDED", {
+      result,
+      timeRemainingMs: this.state.timeRemainingMs,
+    });
+
+    // Stop AI
+    this.state.ai.forEach((ai) => {
+      ai.behaviorState = "patrol";
+    });
+
+    console.log(`[Room ${this.state.code}] Match ended: ${result}`);
+  }
+
+  private allCheckpointsCaptured(): boolean {
+    let allCaptured = true;
+    this.state.checkpoints.forEach((cp) => {
+      if (!cp.captured) allCaptured = false;
+    });
+    return allCaptured;
+  }
+
+  private allHumansDead(): boolean {
+    if (this.state.players.size === 0) return false;
+    let anyAliveOrDowned = false;
+    this.state.players.forEach((p) => {
+      if (!p.isDead) anyAliveOrDowned = true;
+    });
+    return !anyAliveOrDowned;
   }
 
   private applyDamageToAI(
@@ -338,6 +406,7 @@ export class PatriotRoom extends Room<RoomStateSchema> {
       ai.isDead = true;
       ai.behaviorState = "dead";
       ai.deathTime = Date.now();
+      this.state.totalAIKilled++;
       this.broadcast("aiKilled", { aiId, killerId: bullet.ownerId, x: ai.x, y: ai.y });
       const killer = this.state.players.get(bullet.ownerId);
       if (killer) killer.kills++;
@@ -415,6 +484,10 @@ export class PatriotRoom extends Room<RoomStateSchema> {
   }
 
   onAuth(client: Client, options: any): { name: string } {
+    if (this.state.matchState === "ended") {
+      throw new Error("This match has ended. Ask for a new room code.");
+    }
+
     const playerName = (options.playerName || "").trim();
 
     if (!playerName || playerName.length > 20) {

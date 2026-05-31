@@ -17,6 +17,9 @@ import {
   AI_FIRE_REACTION_DELAY_MS,
   AI_CHASE_DESIRED_DISTANCE,
   WEAPONS,
+  WAVE_BASE_COUNT,
+  WAVE_SCALING_FACTOR,
+  WAVE_MAX_AI_ALIVE,
 } from "@patriot/shared";
 import type { WeaponId } from "@patriot/shared";
 import { AISchema } from "../rooms/schema/AISchema.js";
@@ -48,17 +51,60 @@ export class AIManager {
 
   spawnInitial() {
     for (const def of PATRIOT_MAP.initialAISpawns) {
-      const sp = PATRIOT_MAP.enemySpawnPoints[def.spawnPointIndex];
-      if (!sp) continue;
-      const ai = new AISchema();
-      ai.id = `ai_${++aiIdCounter}`;
-      ai.x = sp.x;
-      ai.y = sp.y;
-      ai.weapon = def.weapon;
-      ai.patrolPathId = def.patrolPathId;
-      ai.hp = AI_INITIAL_HP;
-      this.state.ai.set(ai.id, ai);
+      this.spawnOne(def);
     }
+  }
+
+  spawnWave(waveNumber: number) {
+    const target = Math.floor(WAVE_BASE_COUNT * Math.pow(WAVE_SCALING_FACTOR, waveNumber - 1));
+    const currentAlive = this.countAlive();
+    const toSpawn = Math.min(target, WAVE_MAX_AI_ALIVE - currentAlive);
+
+    for (let i = 0; i < toSpawn; i++) {
+      const spawnDef = this.pickSpawnPoint(waveNumber);
+      this.spawnOne(spawnDef);
+    }
+    this.state.totalAISpawned += toSpawn;
+
+    console.log(
+      `[Room ${this.roomCode}] Wave ${waveNumber}: spawned ${toSpawn} mafia (${currentAlive + toSpawn} alive)`
+    );
+  }
+
+  private pickSpawnPoint(waveNumber: number): { spawnPointIndex: number; patrolPathId: string; weapon: "pistol" | "mk18" | "mg" } {
+    const spawnIdx = Math.floor(Math.random() * PATRIOT_MAP.enemySpawnPoints.length);
+    const patrolPath = PATRIOT_MAP.patrolPaths[spawnIdx % PATRIOT_MAP.patrolPaths.length];
+
+    let weapon: "pistol" | "mk18" | "mg" = "mk18";
+    const roll = Math.random();
+    if (waveNumber === 1) {
+      weapon = roll < 0.5 ? "pistol" : "mk18";
+    } else if (waveNumber <= 3) {
+      weapon = roll < 0.2 ? "pistol" : roll < 0.8 ? "mk18" : "mg";
+    } else {
+      weapon = roll < 0.5 ? "mk18" : "mg";
+    }
+
+    return { spawnPointIndex: spawnIdx, patrolPathId: patrolPath.id, weapon };
+  }
+
+  countAlive(): number {
+    let n = 0;
+    this.state.ai.forEach((a) => { if (!a.isDead) n++; });
+    return n;
+  }
+
+  private spawnOne(def: { spawnPointIndex: number; patrolPathId: string; weapon: string }) {
+    const sp = PATRIOT_MAP.enemySpawnPoints[def.spawnPointIndex];
+    if (!sp) return;
+    const ai = new AISchema();
+    ai.id = `ai_${++aiIdCounter}`;
+    ai.x = sp.x;
+    ai.y = sp.y;
+    ai.weapon = def.weapon;
+    ai.patrolPathId = def.patrolPathId;
+    ai.hp = AI_INITIAL_HP;
+    this.state.ai.set(ai.id, ai);
   }
 
   broadcastSound(x: number, y: number) {
@@ -71,6 +117,8 @@ export class AIManager {
   }
 
   update(deltaTime: number) {
+    if (this.state.matchState === "ended") return;
+
     const now = Date.now();
     const toRemove: string[] = [];
     const doSight = now - this.lastSightCheck >= AI_VISION_TICK_INTERVAL;

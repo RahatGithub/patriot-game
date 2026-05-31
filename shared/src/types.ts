@@ -70,3 +70,6 @@ export interface LobbyState {
   players: PlayerInfo[];
   matchStarted: boolean;
 }
+
+export type MatchState = "lobby" | "starting" | "in_progress" | "ended";
+export type MatchResult = "win" | "lose_wipe" | "lose_timeout" | null;

@@ -11,6 +11,8 @@ export class HUDScene extends Phaser.Scene {
   private weaponText!: Phaser.GameObjects.Text;
   private rankText!: Phaser.GameObjects.Text;
   private minimapGfx!: Phaser.GameObjects.Graphics;
+  private timerText!: Phaser.GameObjects.Text;
+  private timerPulsePhase = 0;
 
   constructor() {
     super("HUDScene");
@@ -36,8 +38,8 @@ export class HUDScene extends Phaser.Scene {
     this.minimapGfx = this.add.graphics();
 
     // --- Top-center: timer ---
-    this.add
-      .text(W / 2, 30, "00:00", { fontSize: "28px", color: "#fff", fontStyle: "bold" })
+    this.timerText = this.add
+      .text(W / 2, 30, "--:--", { fontSize: "28px", color: "#fff", fontStyle: "bold" })
       .setOrigin(0.5, 0);
 
     // --- Top-right: enemy counter ---
@@ -127,6 +129,32 @@ export class HUDScene extends Phaser.Scene {
 
           // Mini-map update
           this.updateMinimap(room, me);
+        }
+
+        // Timer update
+        const state = room.state as any;
+        if (state.matchState === "in_progress" || state.matchState === "ended") {
+          const ms = Math.max(0, state.timeRemainingMs ?? 0);
+          const totalSec = Math.ceil(ms / 1000);
+          const min = Math.floor(totalSec / 60);
+          const sec = totalSec % 60;
+          this.timerText.setText(
+            `${String(min).padStart(2, "0")}:${String(sec).padStart(2, "0")}`
+          );
+
+          // Red pulse when < 30s
+          if (ms > 0 && ms <= 30000) {
+            this.timerPulsePhase += 0.2;
+            const alpha = 0.5 + 0.5 * Math.sin(this.timerPulsePhase);
+            this.timerText.setColor(
+              `rgba(255, ${Math.floor(80 * alpha)}, ${Math.floor(80 * alpha)}, 1)`
+            );
+          } else if (ms <= 0) {
+            this.timerText.setColor("#ff2222");
+          } else {
+            this.timerText.setColor("#ffffff");
+            this.timerPulsePhase = 0;
+          }
         }
       },
     });

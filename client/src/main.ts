@@ -45,6 +45,11 @@ game.events.on("leaveMatch", () => {
   screens.show("splash");
 });
 
+// Match ended handler: show end screen overlay
+game.events.on("matchEnded", (data: { result: string }) => {
+  screens.show("matchEnd", { result: data.result });
+});
+
 // Check URL for room code deep link
 const params = new URLSearchParams(window.location.search);
 const roomCode = params.get("room");
