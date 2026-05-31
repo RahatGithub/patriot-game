@@ -27,6 +27,7 @@ import { Explosion } from "../effects/Explosion.js";
 import { getStateCallbacks } from "colyseus.js";
 import { PickupPromptUI } from "../ui/PickupPromptUI.js";
 import { ChatUI } from "../ui/ChatUI.js";
+import { audioManager } from "../audio/AudioManager.js";
 import { PICKUP_INTERACT_RANGE, canUseWeapon, REVIVE_RANGE, BARREL_PICKUP_RANGE, BARREL_CARRY_OFFSET_Y, VEHICLE_INTERACT_RANGE } from "@patriot/shared";
 import type { RankId, WeaponId } from "@patriot/shared";
 
@@ -111,8 +112,9 @@ export class GameScene extends Phaser.Scene {
     this.load.image("mafia_pistol", "/assets/sprites/characters/mafia_pistol.png");
     this.load.image("mafia_mg", "/assets/sprites/characters/mafia_mg.png");
     this.load.on("loaderror", (file: any) => {
-      console.warn(`[GameScene] Asset not found: ${file.key} — using placeholder`);
+      if (file.type !== "audio") console.warn(`[GameScene] Asset not found: ${file.key} — using placeholder`);
     });
+    audioManager.preload(this);
   }
 
   create() {
@@ -330,6 +332,7 @@ export class GameScene extends Phaser.Scene {
       this.debugOverlay = null;
     });
 
+    audioManager.init(this);
     this.game.events.emit("gameSceneReady");
   }
 
@@ -478,17 +481,15 @@ export class GameScene extends Phaser.Scene {
     // Damage event — hit effects
     room.onMessage("damage", (data: any) => {
       const { targetId, x, y } = data;
-      // Blood splatter at hit position
       new BloodSplatter(this, x, y);
+      audioManager.play("hit_flesh", { x, y });
 
-      // Flash the hit player's sprite
       const target =
         targetId === this.sessionId
           ? this.localPlayer
           : this.remotePlayers.get(targetId);
       target?.flashHit();
 
-      // Local player hit: screen flash + camera shake
       if (targetId === this.sessionId) {
         this.cameras.main.shake(100, 0.005);
       }
@@ -502,6 +503,7 @@ export class GameScene extends Phaser.Scene {
           ? this.localPlayer
           : this.remotePlayers.get(victimId);
       player?.setDowned(true);
+      if (victimId === this.sessionId) audioManager.play("downed");
     });
 
     // Player died event
@@ -512,6 +514,7 @@ export class GameScene extends Phaser.Scene {
           ? this.localPlayer
           : this.remotePlayers.get(victimId);
       player?.setDead(true);
+      if (victimId === this.sessionId) audioManager.play("death");
     });
 
     // Also handle AI damage hit flash
@@ -581,6 +584,7 @@ export class GameScene extends Phaser.Scene {
       // Trigger flag color transition
       this.checkpointFlags.get(checkpointId)?.capture();
       this.capturedSet.add(checkpointId);
+      audioManager.play("checkpoint");
 
       // Stats overlay + celebration
       this.showCaptureNotification(order);
@@ -590,6 +594,7 @@ export class GameScene extends Phaser.Scene {
     // Match ended
     room.onMessage("MATCH_ENDED", (data: any) => {
       this.matchEnded = true;
+      audioManager.play(data.result === "win" ? "match_win" : "match_lose");
       this.game.events.emit("matchEnded", {
         result: data.result,
         finalStats: data.finalStats,
@@ -639,6 +644,7 @@ export class GameScene extends Phaser.Scene {
     room.onMessage("crateDestroyed", (data: any) => {
       const ent = this.crateEntities.get(data.crateId);
       if (ent && !ent.destroyed) ent.playDestruction();
+      audioManager.play("crate_break", { x: data.x, y: data.y });
     });
 
     // --- Barrel sync ---
@@ -693,8 +699,9 @@ export class GameScene extends Phaser.Scene {
 
     // --- Explosion event ---
     room.onMessage("explosion", (data: any) => {
-      const { x, y, radius } = data;
+      const { x, y, radius, source } = data;
       new Explosion(this, x, y, radius);
+      audioManager.play(source === "tank_cannon" ? "explosion_large" : "explosion", { x, y });
 
       // Screen shake if local player is nearby
       if (this.localPlayer) {
@@ -753,6 +760,7 @@ export class GameScene extends Phaser.Scene {
     room.onMessage("vehicleHit", (data: any) => {
       const ent = this.vehicleEntities.get(data.vehicleId);
       if (ent) ent.flashHit();
+      audioManager.play("hit_metal", { x: data.x, y: data.y });
     });
 
     room.onMessage("vehicleEntered", (data: any) => {
@@ -770,7 +778,7 @@ export class GameScene extends Phaser.Scene {
     // Cure used effect
     room.onMessage("cureUsed", (data: any) => {
       const { playerId, x, y } = data;
-      console.log(`[GameScene] Cure used by ${playerId}`);
+      audioManager.play("cure", { x, y });
 
       // Green sparkle particles at pickup location
       for (let i = 0; i < 5; i++) {
@@ -811,7 +819,7 @@ export class GameScene extends Phaser.Scene {
     // Weapon picked up effect
     room.onMessage("weaponPicked", (data: any) => {
       const { playerId, weaponId } = data;
-      console.log(`[GameScene] Weapon picked: ${weaponId} by ${playerId}`);
+      audioManager.play("weapon_pickup");
 
       const player =
         playerId === this.sessionId
@@ -833,6 +841,7 @@ export class GameScene extends Phaser.Scene {
 
     // Pickup blocked by rank
     room.onMessage("pickupBlocked", (data: any) => {
+      audioManager.play("blocked");
       this.showWeaponNotification(`Requires ${data.requiredRank}`);
     });
 
@@ -840,6 +849,7 @@ export class GameScene extends Phaser.Scene {
     room.onMessage("playerPromoted", (data: any) => {
       const { playerId, newRankName } = data;
       if (playerId === this.sessionId) {
+        audioManager.play("promotion");
         this.showPromotionNotification(newRankName);
       } else {
         // Teammate promoted — find their name
@@ -888,6 +898,7 @@ export class GameScene extends Phaser.Scene {
     // Revive event
     room.onMessage("playerRevived", (data: any) => {
       const { playerId } = data;
+      audioManager.play("revive");
       if (playerId === this.sessionId && this.localPlayer) {
         this.cameras.main.flash(300, 50, 200, 50);
         this.showWeaponNotification("You're back up!");
@@ -1066,6 +1077,7 @@ export class GameScene extends Phaser.Scene {
           const fx = this.localPlayer.sprite.x + Math.cos(angle) * 35;
           const fy = this.localPlayer.sprite.y + Math.sin(angle) * 35;
           new MuzzleFlash(this, fx, fy);
+          audioManager.playWeaponFire(curWeapon, fx, fy);
 
           // MG: subtle camera shake for heavy weapon feel
           if (curWeapon === "mg") {
@@ -1089,6 +1101,11 @@ export class GameScene extends Phaser.Scene {
         this.cameras.main.shake(150, 0.008);
         this.cameras.main.flash(80, 200, 100, 50);
       }
+    }
+
+    // Update audio spatial tracking
+    if (this.localPlayer) {
+      audioManager.setLocalPlayerPos(this.localPlayer.sprite.x, this.localPlayer.sprite.y);
     }
 
     // Update all players

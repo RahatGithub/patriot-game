@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { PATRIOT_MAP, getRankForKills, getNextRank, RANKS, WEAPONS } from "@patriot/shared";
 import type { RankId, WeaponId } from "@patriot/shared";
+import { audioManager } from "../audio/AudioManager.js";
 
 const MINIMAP_W = 200;
 const MINIMAP_H = 150;
@@ -168,6 +169,15 @@ export class HUDScene extends Phaser.Scene {
       ">\u2715 Leave</div>
     `;
 
+    // --- Mute toggle (top right, below leave) ---
+    root.innerHTML += `
+      <div id="hud-mute" style="
+        position:absolute;top:90px;right:12px;
+        background:rgba(0,0,0,0.6);border:1px solid #555;border-radius:4px;
+        padding:3px 10px;font-size:12px;color:#aaa;cursor:pointer;pointer-events:auto;
+      ">${audioManager.isMuted ? "\uD83D\uDD07 Muted" : "\uD83D\uDD0A Sound"}</div>
+    `;
+
     document.body.appendChild(root);
     this.hudRoot = root;
 
@@ -187,6 +197,12 @@ export class HUDScene extends Phaser.Scene {
     this.leaveBtn = document.getElementById("hud-leave");
 
     this.leaveBtn?.addEventListener("click", () => this.game.events.emit("leaveMatch"));
+
+    const muteBtn = document.getElementById("hud-mute");
+    muteBtn?.addEventListener("click", () => {
+      const muted = audioManager.toggleMute();
+      muteBtn.textContent = muted ? "\uD83D\uDD07 Muted" : "\uD83D\uDD0A Sound";
+    });
   }
 
   private updateHud() {
