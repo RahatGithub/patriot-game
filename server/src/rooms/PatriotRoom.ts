@@ -50,7 +50,11 @@ import {
   TANK_ROTATION_SPEED,
   TANK_RADIUS,
   TANK_CANNON_AOE_RADIUS,
+  CHAT_MAX_MESSAGE_LENGTH,
+  CHAT_MAX_HISTORY,
+  CHAT_RATE_LIMIT_MS,
 } from "@patriot/shared";
+import type { ChatMessage } from "@patriot/shared";
 import type { RankId } from "@patriot/shared";
 import type { InputCommand, WeaponId, DamageSource, MatchResult } from "@patriot/shared";
 import { RoomStateSchema } from "./schema/RoomStateSchema.js";
@@ -76,6 +80,8 @@ export class PatriotRoom extends Room<RoomStateSchema> {
   private allowFriendlyFire = process.env.ALLOW_FF === "1";
   private aiManager!: AIManager;
   private revivingMap = new Map<string, number>();
+  private chatHistory: ChatMessage[] = [];
+  private lastChatAt = new Map<string, number>();
 
   onCreate(options: any) {
     const checkpointCount = VALID_CHECKPOINT_COUNTS.includes(options.checkpointCount)
@@ -262,6 +268,32 @@ export class PatriotRoom extends Room<RoomStateSchema> {
       player.currentWeapon = "pistol";
       player.ammo = 30;
       this.broadcast("weaponDropped", { playerId: player.id });
+    });
+
+    // Chat handler
+    this.onMessage("chat", (client, msg: { text: string }) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+
+      const text = (msg.text || "").trim().substring(0, CHAT_MAX_MESSAGE_LENGTH);
+      if (!text) return;
+
+      const now = Date.now();
+      const last = this.lastChatAt.get(client.sessionId) || 0;
+      if (now - last < CHAT_RATE_LIMIT_MS) return;
+      this.lastChatAt.set(client.sessionId, now);
+
+      const safe = text.replace(/<[^>]*>/g, "");
+      const message: ChatMessage = {
+        id: "m_" + now + "_" + Math.random().toString(36).slice(2),
+        senderId: client.sessionId,
+        senderName: player.name,
+        text: safe,
+        timestamp: now,
+      };
+      this.chatHistory.push(message);
+      if (this.chatHistory.length > CHAT_MAX_HISTORY) this.chatHistory.shift();
+      this.broadcast("chat", message);
     });
 
     // Ping handler
@@ -1474,6 +1506,11 @@ export class PatriotRoom extends Room<RoomStateSchema> {
 
     this.state.players.set(client.sessionId, player);
     this.playerInputs.set(client.sessionId, []);
+
+    // Send chat history to new joiner
+    if (this.chatHistory.length > 0) {
+      client.send("chatHistory", { messages: this.chatHistory.slice(-10) });
+    }
 
     console.log(
       `[Room ${this.state.code}] Player joined: ${auth.name} (${client.sessionId})`

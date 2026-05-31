@@ -19,6 +19,7 @@ export class InputManager {
   reloadPressed = false;
   chatPressed = false;
   scoreboardHeld = false;
+  chatActive = false;
 
   private provider: InputProvider | null = null;
   private scene: Phaser.Scene | null = null;
@@ -36,6 +37,18 @@ export class InputManager {
   private onUpdate(time: number, delta: number) {
     if (!this.provider) return;
     this.provider.update(time, delta);
+
+    if (this.chatActive) {
+      this.moveVector.x = 0;
+      this.moveVector.y = 0;
+      this.firePressed = false;
+      this.fireHeld = false;
+      this.interactPressed = false;
+      this.grenadePressed = false;
+      this.dropPressed = false;
+      this.chatPressed = false;
+      return;
+    }
 
     this.moveVector.x = this.provider.moveVector.x;
     this.moveVector.y = this.provider.moveVector.y;

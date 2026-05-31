@@ -26,6 +26,7 @@ import { Pickup } from "../entities/Pickup.js";
 import { Explosion } from "../effects/Explosion.js";
 import { getStateCallbacks } from "colyseus.js";
 import { PickupPromptUI } from "../ui/PickupPromptUI.js";
+import { ChatUI } from "../ui/ChatUI.js";
 import { PICKUP_INTERACT_RANGE, canUseWeapon, REVIVE_RANGE, BARREL_PICKUP_RANGE, BARREL_CARRY_OFFSET_Y, VEHICLE_INTERACT_RANGE } from "@patriot/shared";
 import type { RankId, WeaponId } from "@patriot/shared";
 
@@ -87,6 +88,9 @@ export class GameScene extends Phaser.Scene {
   private vehicleEntities = new Map<string, Vehicle>();
   private vehiclePromptEl: HTMLElement | null = null;
   private vehicleHud: HTMLElement | null = null;
+
+  // Chat
+  private chatUI: ChatUI | null = null;
 
   constructor() {
     super("GameScene");
@@ -315,6 +319,8 @@ export class GameScene extends Phaser.Scene {
       this.vehiclePromptEl = null;
       this.vehicleHud?.remove();
       this.vehicleHud = null;
+      this.chatUI?.destroy();
+      this.chatUI = null;
       this.pickupEntities.forEach((p) => p.destroy());
       this.pickupEntities.clear();
       this.pickupPrompt.hide();
@@ -891,6 +897,29 @@ export class GameScene extends Phaser.Scene {
     // N key dismisses pickup prompt
     const nKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.N);
     nKey.on("down", () => this.pickupPrompt.hide());
+
+    // --- Chat ---
+    this.chatUI = new ChatUI();
+    this.chatUI.init(
+      this.sessionId,
+      (text) => room.send("chat", { text }),
+      (open) => { this.inputManager.chatActive = open; }
+    );
+
+    room.onMessage("chat", (msg: any) => {
+      this.chatUI?.addMessage(msg);
+    });
+    room.onMessage("chatHistory", (data: any) => {
+      (data.messages || []).forEach((m: any) => this.chatUI?.addMessage(m, true));
+    });
+
+    // Enter key toggles chat open
+    const enterKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER, false);
+    enterKey.on("down", () => {
+      if (this.chatUI && !this.chatUI.chatOpen) {
+        this.chatUI.open();
+      }
+    });
   }
 
   private onPlayerAdd(p: any, sid: string) {

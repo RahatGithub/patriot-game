@@ -105,3 +105,11 @@ export interface VehicleDef {
   y: number;
   rotation?: number;
 }
+
+export interface ChatMessage {
+  id: string;
+  senderId: string;
+  senderName: string;
+  text: string;
+  timestamp: number;
+}

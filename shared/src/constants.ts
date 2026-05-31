@@ -68,3 +68,6 @@ export const TANK_CANNON_FIRE_RATE = 0.5;
 export const TANK_CANNON_PROJECTILE_SPEED = 700;
 export const TANK_CANNON_AOE_RADIUS = 180;
 export const TANK_CANNON_BULLET_RADIUS = 10;
+export const CHAT_MAX_MESSAGE_LENGTH = 200;
+export const CHAT_MAX_HISTORY = 50;
+export const CHAT_RATE_LIMIT_MS = 500;
