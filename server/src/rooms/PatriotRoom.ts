@@ -24,6 +24,9 @@ import {
   getRankForKills,
   canUseWeapon,
   getRankRequiredForWeapon,
+  REVIVE_RANGE,
+  REVIVE_DURATION_MS,
+  REVIVE_RESULT_HP,
 } from "@patriot/shared";
 import type { RankId } from "@patriot/shared";
 import type { InputCommand, WeaponId, DamageSource, MatchResult } from "@patriot/shared";
@@ -44,6 +47,7 @@ export class PatriotRoom extends Room<RoomStateSchema> {
   private bulletIdCounter = 0;
   private allowFriendlyFire = process.env.ALLOW_FF === "1";
   private aiManager!: AIManager;
+  private revivingMap = new Map<string, number>();
 
   onCreate(options: any) {
     const checkpointCount = VALID_CHECKPOINT_COUNTS.includes(options.checkpointCount)
@@ -124,12 +128,23 @@ export class PatriotRoom extends Room<RoomStateSchema> {
       }
     });
 
-    // Interact handler (pickup items)
+    // Interact handler — prioritizes revive over pickup
     this.onMessage("interact", (client) => {
       if (this.state.matchState !== "in_progress") return;
       const player = this.state.players.get(client.sessionId);
       if (!player || player.isDowned || player.isDead) return;
 
+      // 1. Check for downed teammate to revive
+      let nearestDowned: PlayerSchema | null = null;
+      let nearestDownedDist = REVIVE_RANGE;
+      this.state.players.forEach((p) => {
+        if (!p.isDowned || p.isDead || p.id === player.id) return;
+        const d = Math.hypot(p.x - player.x, p.y - player.y);
+        if (d < nearestDownedDist) { nearestDowned = p; nearestDownedDist = d; }
+      });
+      if (nearestDowned) return; // Revive handled by interactHeld flow
+
+      // 2. Try pickup
       let nearest: PickupSchema | null = null;
       let nearestDist = PICKUP_INTERACT_RANGE;
       let nearestId = "";
@@ -140,6 +155,18 @@ export class PatriotRoom extends Room<RoomStateSchema> {
       if (nearest) {
         this.attemptPickup(player, nearest, nearestId, client);
       }
+    });
+
+    // Revive: continuous hold tracking
+    this.onMessage("interactHeld", (client) => {
+      if (this.state.matchState !== "in_progress") return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player || player.isDowned || player.isDead) return;
+      this.revivingMap.set(client.sessionId, Date.now());
+    });
+
+    this.onMessage("interactRelease", (client) => {
+      this.revivingMap.delete(client.sessionId);
     });
 
     // Ping handler
@@ -312,6 +339,39 @@ export class PatriotRoom extends Room<RoomStateSchema> {
           p.deaths++;
           this.broadcast("playerDied", { victimId: pid });
         }
+      }
+    });
+
+    // Revival logic
+    this.state.players.forEach((downed) => {
+      if (!downed.isDowned || downed.isDead) {
+        if (downed.reviveProgress > 0) downed.reviveProgress = 0;
+        downed.reviverIds = "";
+        return;
+      }
+
+      const activeRevivers: PlayerSchema[] = [];
+      this.state.players.forEach((reviver) => {
+        if (reviver.id === downed.id) return;
+        if (reviver.isDowned || reviver.isDead) return;
+        if (!this.isReviving(reviver.id)) return;
+        const d = Math.hypot(reviver.x - downed.x, reviver.y - downed.y);
+        if (d > REVIVE_RANGE) return;
+        activeRevivers.push(reviver);
+      });
+
+      downed.reviverIds = activeRevivers.map((r) => r.id).join(",");
+
+      if (activeRevivers.length === 0) {
+        downed.reviveProgress = Math.max(0, downed.reviveProgress - deltaTime / 2000);
+        return;
+      }
+
+      const rate = activeRevivers.length * (deltaTime / REVIVE_DURATION_MS);
+      downed.reviveProgress = Math.min(1.0, downed.reviveProgress + rate);
+
+      if (downed.reviveProgress >= 1.0) {
+        this.reviveDowned(downed, activeRevivers);
       }
     });
 
@@ -641,6 +701,9 @@ export class PatriotRoom extends Room<RoomStateSchema> {
   ) {
     if (target.isDowned || target.isDead) return;
 
+    // Damage interrupts reviving
+    this.revivingMap.delete(targetId);
+
     const wep = WEAPONS[bullet.weaponId as WeaponId];
     const dmg = wep ? getDamage(wep.damageSource, "player") : 5;
     target.hp = Math.max(0, target.hp - dmg);
@@ -672,6 +735,32 @@ export class PatriotRoom extends Room<RoomStateSchema> {
         killerId: bullet.ownerId,
       });
     }
+  }
+
+  private isReviving(sessionId: string): boolean {
+    const t = this.revivingMap.get(sessionId);
+    if (!t) return false;
+    return Date.now() - t < 250;
+  }
+
+  private reviveDowned(downed: PlayerSchema, revivers: PlayerSchema[]) {
+    downed.isDowned = false;
+    downed.hp = REVIVE_RESULT_HP;
+    downed.currentWeapon = "pistol";
+    downed.grenadeCount = 0;
+    downed.reviveProgress = 0;
+    downed.reviverIds = "";
+    downed.downedAt = 0;
+    downed.downedBy = "";
+
+    revivers.forEach((r) => { r.revives++; });
+
+    this.broadcast("playerRevived", {
+      playerId: downed.id,
+      reviverIds: revivers.map((r) => r.id),
+    });
+
+    console.log(`[Room ${this.state.code}] ${downed.name} revived`);
   }
 
   private checkPromotion(player: PlayerSchema, sessionId: string) {
@@ -805,6 +894,7 @@ export class PatriotRoom extends Room<RoomStateSchema> {
     const wasCreator = client.sessionId === this.state.creatorId;
     this.state.players.delete(client.sessionId);
     this.playerInputs.delete(client.sessionId);
+    this.revivingMap.delete(client.sessionId);
     console.log(`[Room ${this.state.code}] Player removed: ${client.sessionId}`);
 
     if (wasCreator && this.state.players.size > 0) {

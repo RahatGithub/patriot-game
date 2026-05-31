@@ -38,3 +38,6 @@ export const CRATE_HP = 20;
 export const PICKUP_INTERACT_RANGE = 50;
 export const PICKUP_AUTO_RANGE = 30;
 export const MAX_GRENADES = 3;
+export const REVIVE_RANGE = 60;
+export const REVIVE_DURATION_MS = 4000;
+export const REVIVE_RESULT_HP = 50;

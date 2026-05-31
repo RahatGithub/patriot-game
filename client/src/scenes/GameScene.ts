@@ -23,7 +23,7 @@ import { Crate } from "../entities/Crate.js";
 import { Pickup } from "../entities/Pickup.js";
 import { getStateCallbacks } from "colyseus.js";
 import { PickupPromptUI } from "../ui/PickupPromptUI.js";
-import { PICKUP_INTERACT_RANGE, canUseWeapon } from "@patriot/shared";
+import { PICKUP_INTERACT_RANGE, canUseWeapon, REVIVE_RANGE } from "@patriot/shared";
 import type { RankId, WeaponId } from "@patriot/shared";
 
 const FREE_CAM_SPEED = 600;
@@ -71,6 +71,8 @@ export class GameScene extends Phaser.Scene {
   private crateEntities = new Map<string, Crate>();
   private pickupEntities = new Map<string, Pickup>();
   private pickupPrompt = new PickupPromptUI();
+  private reviveBarGfx: Phaser.GameObjects.Graphics | null = null;
+  private revivePromptEl: HTMLElement | null = null;
 
   constructor() {
     super("GameScene");
@@ -133,6 +135,9 @@ export class GameScene extends Phaser.Scene {
 
     // --- Checkpoint zone graphics (redrawn dynamically from server state) ---
     this.checkpointZoneGfx = this.add.graphics().setDepth(1);
+
+    // Revive progress bar (world-space, redrawn per frame)
+    this.reviveBarGfx = this.add.graphics().setDepth(25);
 
     // --- Input manager ---
     this.inputManager = new InputManager();
@@ -279,6 +284,8 @@ export class GameScene extends Phaser.Scene {
       this.pickupEntities.forEach((p) => p.destroy());
       this.pickupEntities.clear();
       this.pickupPrompt.hide();
+      this.revivePromptEl?.remove();
+      this.revivePromptEl = null;
       this.debugOverlay?.destroy();
       this.debugOverlay = null;
     });
@@ -691,9 +698,34 @@ export class GameScene extends Phaser.Scene {
 
     // --- Interact key (E) ---
     const eKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.E);
+    let eHeldTimer = 0;
     eKey.on("down", () => {
       if (this.matchEnded) return;
       room.send("interact");
+      eHeldTimer = 0;
+    });
+    eKey.on("up", () => {
+      room.send("interactRelease");
+    });
+
+    // Send interactHeld every 100ms while E is held
+    this.time.addEvent({
+      delay: 100,
+      loop: true,
+      callback: () => {
+        if (eKey.isDown && !this.matchEnded) {
+          room.send("interactHeld");
+        }
+      },
+    });
+
+    // Revive event
+    room.onMessage("playerRevived", (data: any) => {
+      const { playerId } = data;
+      if (playerId === this.sessionId && this.localPlayer) {
+        this.cameras.main.flash(300, 50, 200, 50);
+        this.showWeaponNotification("You're back up!");
+      }
     });
 
     // N key dismisses pickup prompt
@@ -875,6 +907,7 @@ export class GameScene extends Phaser.Scene {
     // Update pickups (bob animation) + proximity prompt
     this.pickupEntities.forEach((pk) => pk.update(delta));
     this.updatePickupPrompt();
+    this.updateReviveUI();
   }
 
   private toggleGrid() {
@@ -1266,5 +1299,89 @@ export class GameScene extends Phaser.Scene {
       el.style.opacity = "0";
       setTimeout(() => el.remove(), 500);
     }, 2000);
+  }
+
+  private updateReviveUI() {
+    const room = this.networkManager?.getRoom();
+    if (!room || !this.reviveBarGfx) { this.hideRevivePrompt(); return; }
+
+    this.reviveBarGfx.clear();
+
+    const cam = this.cameras.main;
+    let showingPrompt = false;
+
+    // Draw revive progress bars above all downed players + show prompt for local player
+    (room.state as any).players?.forEach((p: any, sid: string) => {
+      if (!p.isDowned || p.isDead) return;
+      if (sid === this.sessionId) return; // Don't show revive prompt for self
+
+      const progress = p.reviveProgress ?? 0;
+
+      // Draw progress bar in world space above downed player
+      if (progress > 0) {
+        const barW = 40;
+        const barH = 5;
+        const bx = p.x - barW / 2;
+        const by = p.y - 55;
+        this.reviveBarGfx!.fillStyle(0x333333, 0.8);
+        this.reviveBarGfx!.fillRect(bx, by, barW, barH);
+        this.reviveBarGfx!.fillStyle(0x44ff44, 1);
+        this.reviveBarGfx!.fillRect(bx, by, barW * progress, barH);
+      }
+
+      // Show "Hold E to Revive" prompt for local player if nearby
+      if (this.localPlayer && !this.localPlayer.isDowned) {
+        const dx = this.localPlayer.sprite.x - p.x;
+        const dy = this.localPlayer.sprite.y - p.y;
+        if (dx * dx + dy * dy <= REVIVE_RANGE * REVIVE_RANGE) {
+          const sx = (p.x - cam.scrollX) * cam.zoom;
+          const sy = (p.y - cam.scrollY) * cam.zoom;
+          this.showRevivePrompt(sx, sy, progress);
+          showingPrompt = true;
+        }
+      }
+    });
+
+    if (!showingPrompt) this.hideRevivePrompt();
+
+    // If local player is downed, draw their own progress
+    if (this.localPlayer?.isDowned) {
+      const me = (room.state as any).players?.get(this.sessionId);
+      if (me && me.reviveProgress > 0) {
+        const barW = 40;
+        const barH = 5;
+        const bx = me.x - barW / 2;
+        const by = me.y - 55;
+        this.reviveBarGfx.fillStyle(0x333333, 0.8);
+        this.reviveBarGfx.fillRect(bx, by, barW, barH);
+        this.reviveBarGfx.fillStyle(0x44ff44, 1);
+        this.reviveBarGfx.fillRect(bx, by, barW * me.reviveProgress, barH);
+      }
+    }
+  }
+
+  private showRevivePrompt(sx: number, sy: number, progress: number) {
+    if (!this.revivePromptEl) {
+      const el = document.createElement("div");
+      el.id = "revive-prompt";
+      el.style.cssText = `
+        position:fixed; transform:translateX(-50%);
+        background:rgba(0,0,0,0.85); border:2px solid #44ff44; border-radius:6px;
+        padding:6px 14px; color:#44ff44; font-family:monospace; font-size:12px;
+        z-index:1000; text-align:center; pointer-events:none; white-space:nowrap;
+      `;
+      document.body.appendChild(el);
+      this.revivePromptEl = el;
+    }
+    this.revivePromptEl.style.left = `${sx}px`;
+    this.revivePromptEl.style.top = `${sy - 90}px`;
+    this.revivePromptEl.textContent = progress > 0 ? `Reviving... ${Math.floor(progress * 100)}%` : "Hold E to Revive";
+  }
+
+  private hideRevivePrompt() {
+    if (this.revivePromptEl) {
+      this.revivePromptEl.remove();
+      this.revivePromptEl = null;
+    }
   }
 }
