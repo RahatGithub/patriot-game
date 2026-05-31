@@ -38,4 +38,5 @@ export class PlayerSchema extends Schema {
   @type("string") carriedBarrelId: string = "";
   @type("number") lastGrenadeAt: number = 0;
   @type("string") inVehicleId: string = "";
+  @type("string") previousWeapon: string = "";
 }

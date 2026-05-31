@@ -45,6 +45,11 @@ import {
   TRUCK_ROTATION_SPEED,
   TRUCK_CAPACITY,
   TRUCK_RADIUS,
+  TANK_HP,
+  TANK_SPEED,
+  TANK_ROTATION_SPEED,
+  TANK_RADIUS,
+  TANK_CANNON_AOE_RADIUS,
 } from "@patriot/shared";
 import type { RankId } from "@patriot/shared";
 import type { InputCommand, WeaponId, DamageSource, MatchResult } from "@patriot/shared";
@@ -364,7 +369,7 @@ export class PatriotRoom extends Room<RoomStateSchema> {
 
       const wep = WEAPONS[bullet.weaponId as WeaponId];
       const isGrenade = bullet.weaponId === "grenade";
-      const isRocket = bullet.weaponId === "bazooka";
+      const isRocket = bullet.weaponId === "bazooka" || bullet.weaponId === "tank_cannon";
       const expired = now - bullet.spawnedAt > (wep?.bulletLifetimeMs ?? 1000);
       const oob = bullet.x < 0 || bullet.x > PATRIOT_MAP.width || bullet.y < 0 || bullet.y > PATRIOT_MAP.height;
       const hitWall = checkWallCollision(bullet.x, bullet.y, wep?.bulletRadius ?? 4);
@@ -516,7 +521,7 @@ export class PatriotRoom extends Room<RoomStateSchema> {
           if (vehicle.passengerIds.indexOf(bullet.ownerId) !== -1) return;
           const dx = bullet.x - vehicle.x;
           const dy = bullet.y - vehicle.y;
-          const vRadius = vehicle.type === "truck" ? TRUCK_RADIUS : JEEP_RADIUS;
+          const vRadius = vehicle.type === "tank" ? TANK_RADIUS : vehicle.type === "truck" ? TRUCK_RADIUS : JEEP_RADIUS;
           const r = vRadius + (wep?.bulletRadius ?? 4);
           if (dx * dx + dy * dy < r * r) {
             const target = vehicle.type as DamageTarget;
@@ -688,7 +693,7 @@ export class PatriotRoom extends Room<RoomStateSchema> {
       v.x = def.x;
       v.y = def.y;
       v.rotation = def.rotation ?? 0;
-      v.hp = def.type === "jeep" ? JEEP_HP : def.type === "truck" ? TRUCK_HP : 120;
+      v.hp = def.type === "jeep" ? JEEP_HP : def.type === "truck" ? TRUCK_HP : TANK_HP;
       this.state.vehicles.set(v.id, v);
     });
     console.log(`[Room ${this.state.code}] Initialized ${PATRIOT_MAP.vehicles.length} vehicles`);
@@ -718,6 +723,15 @@ export class PatriotRoom extends Room<RoomStateSchema> {
         player.y = vehicle.y;
         this.broadcast("vehicleEntered", { vehicleId: vehicle.id, playerId: sessionId, role: "passenger" });
       }
+    } else if (vehicle.type === "tank") {
+      if (vehicle.driverId) return;
+      vehicle.driverId = sessionId;
+      player.inVehicleId = vehicle.id;
+      player.x = vehicle.x;
+      player.y = vehicle.y;
+      player.previousWeapon = player.currentWeapon;
+      player.currentWeapon = "tank_cannon";
+      this.broadcast("vehicleEntered", { vehicleId: vehicle.id, playerId: sessionId, role: "driver" });
     }
   }
 
@@ -726,6 +740,12 @@ export class PatriotRoom extends Room<RoomStateSchema> {
     if (!vehicle) {
       player.inVehicleId = "";
       return;
+    }
+
+    // Restore previous weapon if exiting a tank
+    if (vehicle.type === "tank" && player.previousWeapon) {
+      player.currentWeapon = player.previousWeapon;
+      player.previousWeapon = "";
     }
 
     let angle: number;
@@ -754,9 +774,9 @@ export class PatriotRoom extends Room<RoomStateSchema> {
     const mag = Math.sqrt(mx * mx + my * my);
     if (mag > 1) { mx /= mag; my /= mag; }
 
-    const speed = vehicle.type === "truck" ? TRUCK_SPEED : JEEP_SPEED;
-    const rotSpeed = vehicle.type === "truck" ? TRUCK_ROTATION_SPEED : JEEP_ROTATION_SPEED;
-    const radius = vehicle.type === "truck" ? TRUCK_RADIUS : JEEP_RADIUS;
+    const speed = vehicle.type === "tank" ? TANK_SPEED : vehicle.type === "truck" ? TRUCK_SPEED : JEEP_SPEED;
+    const rotSpeed = vehicle.type === "tank" ? TANK_ROTATION_SPEED : vehicle.type === "truck" ? TRUCK_ROTATION_SPEED : JEEP_ROTATION_SPEED;
+    const radius = vehicle.type === "tank" ? TANK_RADIUS : vehicle.type === "truck" ? TRUCK_RADIUS : JEEP_RADIUS;
 
     const targetVx = mx * speed;
     const targetVy = my * speed;
@@ -910,18 +930,22 @@ export class PatriotRoom extends Room<RoomStateSchema> {
   }
 
   private detonateRocket(rocket: BulletSchema) {
+    const isTankCannon = rocket.weaponId === "tank_cannon";
+    const radius = isTankCannon ? TANK_CANNON_AOE_RADIUS : BAZOOKA_AOE_RADIUS;
+    const source = isTankCannon ? "tank_cannon" : "bazooka_rocket";
+
     this.broadcast("explosion", {
       x: rocket.x,
       y: rocket.y,
-      radius: BAZOOKA_AOE_RADIUS,
-      source: "bazooka_rocket",
+      radius,
+      source,
     });
 
     applyAoE(this, {
-      source: "bazooka_rocket",
+      source: source as any,
       x: rocket.x,
       y: rocket.y,
-      radius: BAZOOKA_AOE_RADIUS,
+      radius,
       attackerId: rocket.ownerId,
       attackerFaction: this.attackerFactionOf(rocket.ownerId),
       ignoreFriendlyFire: false,

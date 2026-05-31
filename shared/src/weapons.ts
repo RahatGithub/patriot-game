@@ -1,6 +1,6 @@
 import type { DamageSource } from "./damage.js";
 
-export type WeaponId = "pistol" | "mk18" | "mg" | "bazooka" | "grenade";
+export type WeaponId = "pistol" | "mk18" | "mg" | "bazooka" | "grenade" | "tank_cannon";
 
 export interface WeaponDef {
   id: WeaponId;
@@ -93,5 +93,20 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     ammo: 3,
     spread: 0,
     projectileColor: "#556B2F",
+  },
+  tank_cannon: {
+    id: "tank_cannon",
+    name: "Tank Cannon",
+    fireMode: "semi",
+    fireRatePerSec: 0.5,
+    bulletSpeed: 700,
+    bulletLifetimeMs: 2500,
+    bulletRadius: 10,
+    damage: 80,
+    damageSource: "tank_cannon",
+    rankRequired: 1,
+    ammo: "unlimited",
+    spread: 0,
+    projectileColor: "#FFA500",
   },
 };

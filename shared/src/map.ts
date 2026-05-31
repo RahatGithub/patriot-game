@@ -296,5 +296,6 @@ export const PATRIOT_MAP: MapDefinition = {
     { id: "jeep_1", type: "jeep", x: 400, y: 1400, rotation: 0 },
     { id: "jeep_2", type: "jeep", x: 1800, y: 1100, rotation: Math.PI / 2 },
     { id: "truck_1", type: "truck", x: 1400, y: 900, rotation: 0 },
+    { id: "tank_1", type: "tank", x: 3200, y: 2500, rotation: Math.PI },
   ],
 };

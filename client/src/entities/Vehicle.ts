@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { JEEP_HP, TRUCK_HP } from "@patriot/shared";
+import { JEEP_HP, TRUCK_HP, TANK_HP } from "@patriot/shared";
 
 const HP_BAR_W = 50;
 const HP_BAR_H = 5;
@@ -30,7 +30,7 @@ export class Vehicle {
     this.x = x;
     this.y = y;
     this.rotation = rotation;
-    this.maxHp = type === "jeep" ? JEEP_HP : type === "truck" ? TRUCK_HP : 120;
+    this.maxHp = type === "jeep" ? JEEP_HP : type === "truck" ? TRUCK_HP : TANK_HP;
     this.hp = this.maxHp;
 
     const texKey = type === "jeep" ? "jeep_military" : type === "truck" ? "truck_military" : "tank_military";

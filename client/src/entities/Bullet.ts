@@ -18,7 +18,7 @@ export class Bullet {
     this.scene = scene;
     this.weaponId = weaponId;
     this.isGrenade = weaponId === "grenade";
-    this.isRocket = weaponId === "bazooka";
+    this.isRocket = weaponId === "bazooka" || weaponId === "tank_cannon";
     const wep = WEAPONS[weaponId as WeaponId];
     const color = parseInt((wep?.projectileColor ?? "#FFD700").replace("#", ""), 16);
     const radius = wep?.bulletRadius ?? 4;
