@@ -72,5 +72,28 @@ export class HUDScene extends Phaser.Scene {
     leaveBtn.on("pointerdown", () => {
       this.game.events.emit("leaveMatch");
     });
+
+    // --- Ping display (bottom-right) ---
+    const pingText = this.add
+      .text(W - 30, H - 10, "Ping: --", {
+        fontSize: "11px",
+        color: "#4caf50",
+      })
+      .setOrigin(1, 1);
+
+    // Update ping from GameScene's network manager
+    this.time.addEvent({
+      delay: 1000,
+      loop: true,
+      callback: () => {
+        const gameScene = this.scene.get("GameScene") as any;
+        const nm = gameScene?.networkManager;
+        if (nm) {
+          const p = nm.ping;
+          pingText.setText(`Ping: ${p}ms`);
+          pingText.setColor(p < 80 ? "#4caf50" : p < 150 ? "#ddaa00" : "#cc2222");
+        }
+      },
+    });
   }
 }

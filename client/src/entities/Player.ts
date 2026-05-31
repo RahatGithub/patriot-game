@@ -1,11 +1,18 @@
 import Phaser from "phaser";
 import type { PlayerRank } from "@patriot/shared";
-import { RANK_STARS, PLAYER_RADIUS } from "@patriot/shared";
+import { RANK_STARS, PLAYER_RADIUS, INTERPOLATION_DELAY_MS } from "@patriot/shared";
 
 const HP_BAR_W = 50;
 const HP_BAR_H = 6;
 const BOB_FREQ = 0.012;
 const BOB_AMP = 2;
+
+interface PosSnapshot {
+  timestamp: number;
+  x: number;
+  y: number;
+  aimAngle: number;
+}
 
 export class Player {
   id: string;
@@ -24,6 +31,9 @@ export class Player {
   private bobPhase = 0;
   private bobOffset = 0;
   private usingPlaceholder: boolean;
+
+  // Interpolation buffer (remote players only)
+  private interpBuffer: PosSnapshot[] = [];
 
   get x() {
     return this.sprite.x;
@@ -45,7 +55,6 @@ export class Player {
     this.name = name;
     this.isLocal = isLocal;
 
-    // Create sprite or placeholder
     if (scene.textures.exists("soldier_patriot")) {
       const spr = scene.physics.add.sprite(x, y, "soldier_patriot");
       spr.setOrigin(0.5, 0.5);
@@ -54,18 +63,16 @@ export class Player {
       this.sprite = spr;
       this.usingPlaceholder = false;
     } else {
-      const rect = scene.add.rectangle(x, y, 48, 48, 0x556b2f);
+      const rect = scene.add.rectangle(x, y, 48, 48, isLocal ? 0x556b2f : 0x8b4513);
       rect.setDepth(10);
       scene.physics.add.existing(rect);
       this.sprite = rect as any;
       this.usingPlaceholder = true;
     }
 
-    // Physics body — circular
     const body = this.sprite.body as Phaser.Physics.Arcade.Body;
     body.setCircle(PLAYER_RADIUS);
     if (!this.usingPlaceholder) {
-      // Center the circle body on the scaled sprite
       const sw = (this.sprite as Phaser.Physics.Arcade.Sprite).displayWidth;
       const sh = (this.sprite as Phaser.Physics.Arcade.Sprite).displayHeight;
       body.setOffset(sw / 0.06 / 2 - PLAYER_RADIUS, sh / 0.06 / 2 - PLAYER_RADIUS);
@@ -75,19 +82,23 @@ export class Player {
     body.setCollideWorldBounds(true);
     body.setBounce(0, 0);
 
-    // Name label with stars
+    // Remote players don't need physics simulation — they're interpolated
+    if (!isLocal) {
+      body.setImmovable(true);
+      body.moves = false;
+    }
+
     const stars = "\u2605".repeat(RANK_STARS[this.rank]);
     this.nameLabel = scene.add
       .text(x, y - 50, `${name} ${stars}`, {
         fontSize: "14px",
-        color: "#fff",
+        color: isLocal ? "#fff" : "#ccc",
         stroke: "#000",
         strokeThickness: 2,
       })
       .setOrigin(0.5)
       .setDepth(20);
 
-    // HP bar
     this.hpBarBg = scene.add
       .rectangle(x, y - 34, HP_BAR_W, HP_BAR_H, 0x333333)
       .setOrigin(0.5)
@@ -100,7 +111,6 @@ export class Player {
 
   setAimAngle(angle: number) {
     this.aimAngle = angle;
-    // Sprite faces "up" by default → offset by +π/2
     this.sprite.rotation = angle + Math.PI / 2;
   }
 
@@ -117,33 +127,77 @@ export class Player {
     this.nameLabel.setText(`${this.name} ${stars}`);
   }
 
+  /** Set position directly (for server reconciliation) */
+  setPosition(x: number, y: number) {
+    this.sprite.setPosition(x, y);
+    (this.sprite.body as Phaser.Physics.Arcade.Body).reset(x, y);
+  }
+
+  /** Push a server snapshot into the interpolation buffer (remote players) */
+  pushSnapshot(x: number, y: number, aimAngle: number) {
+    this.interpBuffer.push({ timestamp: Date.now(), x, y, aimAngle });
+    // Keep buffer small
+    if (this.interpBuffer.length > 10) {
+      this.interpBuffer.shift();
+    }
+  }
+
+  /** Interpolate remote player position from buffer */
+  interpolate() {
+    const buf = this.interpBuffer;
+    if (buf.length < 2) {
+      if (buf.length === 1) {
+        this.sprite.setPosition(buf[0].x, buf[0].y);
+        this.setAimAngle(buf[0].aimAngle);
+      }
+      return;
+    }
+
+    const renderTime = Date.now() - INTERPOLATION_DELAY_MS;
+
+    // Find bracketing snapshots
+    for (let i = buf.length - 1; i >= 1; i--) {
+      const prev = buf[i - 1];
+      const next = buf[i];
+      if (prev.timestamp <= renderTime && next.timestamp >= renderTime) {
+        const range = next.timestamp - prev.timestamp;
+        const t = range > 0 ? (renderTime - prev.timestamp) / range : 0;
+        const ix = prev.x + (next.x - prev.x) * t;
+        const iy = prev.y + (next.y - prev.y) * t;
+        this.sprite.setPosition(ix, iy);
+        this.setAimAngle(next.aimAngle);
+        return;
+      }
+    }
+
+    // Fallback: use latest
+    const last = buf[buf.length - 1];
+    this.sprite.setPosition(last.x, last.y);
+    this.setAimAngle(last.aimAngle);
+  }
+
   update(dt: number) {
     const body = this.sprite.body as Phaser.Physics.Arcade.Body;
-    const speed = body.velocity.length();
 
-    // Running bob
-    if (speed > 10) {
-      this.bobPhase += dt * BOB_FREQ;
-      this.bobOffset = Math.sin(this.bobPhase) * BOB_AMP;
+    if (this.isLocal) {
+      const speed = body.velocity.length();
+      if (speed > 10) {
+        this.bobPhase += dt * BOB_FREQ;
+        this.bobOffset = Math.sin(this.bobPhase) * BOB_AMP;
+      } else {
+        this.bobOffset *= 0.85;
+        if (Math.abs(this.bobOffset) < 0.1) this.bobOffset = 0;
+      }
     } else {
-      this.bobOffset *= 0.85; // smooth reset
-      if (Math.abs(this.bobOffset) < 0.1) this.bobOffset = 0;
+      this.bobOffset = 0;
     }
 
-    // Position overlays to follow sprite
     const sx = this.sprite.x;
-    const sy = this.sprite.y + this.bobOffset;
-
-    // Apply bob to visual only (not physics body)
-    if (!this.usingPlaceholder) {
-      (this.sprite as Phaser.Physics.Arcade.Sprite).y = body.center.y + this.bobOffset;
-    }
-
-    this.nameLabel.setPosition(sx, body.center.y - 50);
-    this.hpBarBg.setPosition(sx, body.center.y - 34);
+    this.nameLabel.setPosition(sx, this.sprite.y - 50 + this.bobOffset);
+    this.hpBarBg.setPosition(sx, this.sprite.y - 34 + this.bobOffset);
     this.hpBarFg.setPosition(
       sx - (HP_BAR_W - this.hpBarFg.width) / 2,
-      body.center.y - 34
+      this.sprite.y - 34 + this.bobOffset
     );
   }
 

@@ -21,6 +21,27 @@ export interface RoomConfig {
   checkpointCount: 3 | 5 | 7;
 }
 
+export interface InputCommand {
+  sequence: number;
+  moveX: number;
+  moveY: number;
+  aimAngle: number;
+  fire: boolean;
+  timestamp: number;
+}
+
+export interface PlayerStateSnapshot {
+  id: string;
+  name: string;
+  rank: string;
+  x: number;
+  y: number;
+  aimAngle: number;
+  hp: number;
+  isDowned: boolean;
+  lastProcessedInput: number;
+}
+
 export interface LobbyState {
   code: RoomCode;
   creatorId: PlayerId;

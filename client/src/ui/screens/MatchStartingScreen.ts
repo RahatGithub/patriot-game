@@ -41,7 +41,11 @@ export class MatchStartingScreen implements Screen {
 
       // Start GameScene (replaces BootScene)
       setTimeout(() => {
-        game.scene.start("GameScene", { deviceProfile: profile, playerName });
+        game.scene.start("GameScene", {
+          deviceProfile: profile,
+          playerName,
+          networkManager: ctx.network,
+        });
       }, 100);
     }
 
