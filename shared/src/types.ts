@@ -73,3 +73,19 @@ export interface LobbyState {
 
 export type MatchState = "lobby" | "starting" | "in_progress" | "ended";
 export type MatchResult = "win" | "lose_wipe" | "lose_timeout" | null;
+
+export type PickupType =
+  | "cure"
+  | "weapon_pistol"
+  | "weapon_mk18"
+  | "weapon_grenade"
+  | "weapon_mg"
+  | "weapon_bazooka"
+  | "test";
+
+export interface CrateDef {
+  id: string;
+  x: number;
+  y: number;
+  content: PickupType;
+}

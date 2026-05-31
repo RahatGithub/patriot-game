@@ -16,6 +16,9 @@ import {
   AI_RADIUS,
   CHECKPOINT_CAPTURE_TIME_MS,
   MATCH_TIME_PER_CHECKPOINT_MS,
+  CRATE_RADIUS,
+  PICKUP_AUTO_RANGE,
+  PICKUP_INTERACT_RANGE,
 } from "@patriot/shared";
 import type { InputCommand, WeaponId, DamageSource, MatchResult } from "@patriot/shared";
 import { RoomStateSchema } from "./schema/RoomStateSchema.js";
@@ -26,6 +29,8 @@ import { registerRoom, unregisterRoom } from "../utils/roomRegistry.js";
 import { checkWallCollision, clampToMap } from "../systems/collision.js";
 import { AIManager } from "../ai/AIManager.js";
 import { CheckpointSchema } from "./schema/CheckpointSchema.js";
+import { CrateSchema } from "./schema/CrateSchema.js";
+import { PickupSchema } from "./schema/PickupSchema.js";
 
 export class PatriotRoom extends Room<RoomStateSchema> {
   maxClients = MAX_PLAYERS_PER_ROOM;
@@ -113,6 +118,24 @@ export class PatriotRoom extends Room<RoomStateSchema> {
       }
     });
 
+    // Interact handler (pickup items)
+    this.onMessage("interact", (client) => {
+      if (this.state.matchState !== "in_progress") return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player || player.isDowned || player.isDead) return;
+
+      let nearest: PickupSchema | null = null;
+      let nearestDist = PICKUP_INTERACT_RANGE;
+      let nearestId = "";
+      this.state.pickups.forEach((pk, id) => {
+        const d = Math.hypot(pk.x - player.x, pk.y - player.y);
+        if (d < nearestDist) { nearest = pk; nearestDist = d; nearestId = id; }
+      });
+      if (nearest) {
+        this.attemptPickup(player, nearest, nearestId);
+      }
+    });
+
     // Ping handler
     this.onMessage("ping", (client, data: { t: number }) => {
       client.send("pong", { t: data.t });
@@ -156,6 +179,7 @@ export class PatriotRoom extends Room<RoomStateSchema> {
     this.state.timeRemainingMs = totalMs;
 
     this.initializeCheckpoints();
+    this.initializeCrates();
     this.aiManager.spawnWave(1);
 
     console.log(`[Room ${this.state.code}] Match started (${totalMs / 1000}s)`);
@@ -249,6 +273,26 @@ export class PatriotRoom extends Room<RoomStateSchema> {
           }
         });
       }
+
+      // Crate hit detection (any bullet can damage crates)
+      if (!hit) {
+        this.state.crates.forEach((crate, crateId) => {
+          if (hit || crate.destroyed) return;
+          const dx = bullet.x - crate.x;
+          const dy = bullet.y - crate.y;
+          const r = CRATE_RADIUS + (wep?.bulletRadius ?? 4);
+          if (dx * dx + dy * dy < r * r) {
+            const dmg = wep ? getDamage(wep.damageSource, "crate") : 10;
+            crate.hp = Math.max(0, crate.hp - dmg);
+            this.broadcast("crateHit", { crateId, x: crate.x, y: crate.y });
+            if (crate.hp <= 0) {
+              this.destroyCrate(crate, crateId);
+            }
+            toRemove.push(id);
+            hit = true;
+          }
+        });
+      }
     });
     for (const id of toRemove) {
       this.state.bullets.delete(id);
@@ -307,6 +351,22 @@ export class PatriotRoom extends Room<RoomStateSchema> {
       }
       // If mafia in zone with humans: progress paused (no increment, no decay)
     });
+
+    // Auto-pickup check
+    const pickupsToRemove: string[] = [];
+    this.state.pickups.forEach((pk, pkId) => {
+      if (!this.isAutoPickupType(pk.type)) return;
+      this.state.players.forEach((player) => {
+        if (player.isDead || player.isDowned) return;
+        if (Math.hypot(pk.x - player.x, pk.y - player.y) < PICKUP_AUTO_RANGE) {
+          this.attemptPickup(player, pk, pkId);
+          pickupsToRemove.push(pkId);
+        }
+      });
+    });
+    for (const id of pickupsToRemove) {
+      this.state.pickups.delete(id);
+    }
   }
 
   private initializeCheckpoints() {
@@ -324,6 +384,56 @@ export class PatriotRoom extends Room<RoomStateSchema> {
     });
 
     console.log(`[Room ${this.state.code}] Initialized ${count} checkpoints`);
+  }
+
+  private initializeCrates() {
+    PATRIOT_MAP.crates.forEach((def) => {
+      const c = new CrateSchema();
+      c.id = def.id;
+      c.x = def.x;
+      c.y = def.y;
+      c.content = def.content;
+      this.state.crates.set(c.id, c);
+    });
+    console.log(`[Room ${this.state.code}] Initialized ${PATRIOT_MAP.crates.length} crates`);
+  }
+
+  private destroyCrate(crate: CrateSchema, crateId: string) {
+    crate.destroyed = true;
+    this.broadcast("crateDestroyed", {
+      crateId,
+      x: crate.x,
+      y: crate.y,
+      content: crate.content,
+    });
+
+    // Spawn pickup first, then clean up crate after delay
+    const pickup = new PickupSchema();
+    pickup.id = "p_" + crateId;
+    pickup.type = crate.content;
+    pickup.x = crate.x;
+    pickup.y = crate.y;
+    pickup.spawnedAt = Date.now();
+    this.state.pickups.set(pickup.id, pickup);
+
+    this.clock.setTimeout(() => this.state.crates.delete(crateId), 1500);
+  }
+
+  private attemptPickup(player: PlayerSchema, pickup: PickupSchema, pickupId: string) {
+    switch (pickup.type) {
+      case "test":
+        console.log(`[Room ${this.state.code}] ${player.name} picked up TEST pickup ${pickupId}`);
+        this.state.pickups.delete(pickupId);
+        break;
+      // case 'cure': Prompt 20
+      // case 'weapon_*': Prompt 21
+      default:
+        console.warn(`Unknown pickup type: ${pickup.type}`);
+    }
+  }
+
+  private isAutoPickupType(type: string): boolean {
+    return type === "cure" || type === "test";
   }
 
   private snapshotStats() {

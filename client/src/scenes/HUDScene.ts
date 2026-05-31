@@ -176,6 +176,14 @@ export class HUDScene extends Phaser.Scene {
       gfx.fillCircle(dotX, dotY, 4);
     });
 
+    // Draw pickup dots
+    room.state.pickups?.forEach((pk: any) => {
+      const px = MINIMAP_X + pk.x * scaleX;
+      const py = MINIMAP_Y + pk.y * scaleY;
+      gfx.fillStyle(0xffffff, 0.8);
+      gfx.fillCircle(px, py, 2);
+    });
+
     // Draw local player dot
     if (localPlayer && !localPlayer.isDead) {
       const px = MINIMAP_X + localPlayer.x * scaleX;

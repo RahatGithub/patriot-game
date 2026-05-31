@@ -33,3 +33,7 @@ export const MATCH_TIME_PER_CHECKPOINT_MS = 2 * 60 * 1000;
 export const WAVE_BASE_COUNT = 5;
 export const WAVE_SCALING_FACTOR = 1.5;
 export const WAVE_MAX_AI_ALIVE = 30;
+export const CRATE_RADIUS = 30;
+export const CRATE_HP = 20;
+export const PICKUP_INTERACT_RANGE = 50;
+export const PICKUP_AUTO_RANGE = 30;

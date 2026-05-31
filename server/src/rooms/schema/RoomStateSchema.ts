@@ -3,6 +3,8 @@ import { PlayerSchema } from "./PlayerSchema.js";
 import { BulletSchema } from "./BulletSchema.js";
 import { AISchema } from "./AISchema.js";
 import { CheckpointSchema } from "./CheckpointSchema.js";
+import { CrateSchema } from "./CrateSchema.js";
+import { PickupSchema } from "./PickupSchema.js";
 
 export class RoomStateSchema extends Schema {
   @type("string") code: string;
@@ -21,4 +23,6 @@ export class RoomStateSchema extends Schema {
   @type({ map: BulletSchema }) bullets = new MapSchema<BulletSchema>();
   @type({ map: AISchema }) ai = new MapSchema<AISchema>();
   @type({ map: CheckpointSchema }) checkpoints = new MapSchema<CheckpointSchema>();
+  @type({ map: CrateSchema }) crates = new MapSchema<CrateSchema>();
+  @type({ map: PickupSchema }) pickups = new MapSchema<PickupSchema>();
 }

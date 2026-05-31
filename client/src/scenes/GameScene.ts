@@ -19,6 +19,8 @@ import { checkWallCollisionClient } from "../systems/collisionClient.js";
 import { BloodSplatter } from "../effects/BloodSplatter.js";
 import { AIEntity } from "../entities/AIEntity.js";
 import { CheckpointFlag } from "../entities/CheckpointFlag.js";
+import { Crate } from "../entities/Crate.js";
+import { Pickup } from "../entities/Pickup.js";
 
 const FREE_CAM_SPEED = 600;
 
@@ -59,6 +61,10 @@ export class GameScene extends Phaser.Scene {
   private localPlayerWasDead = false;
   private matchEnded = false;
   private lastWaveCount = 0;
+
+  // Crates + Pickups
+  private crateEntities = new Map<string, Crate>();
+  private pickupEntities = new Map<string, Pickup>();
 
   constructor() {
     super("GameScene");
@@ -270,6 +276,10 @@ export class GameScene extends Phaser.Scene {
       this.checkpointLabels.forEach((l) => l.destroy());
       this.checkpointLabels.clear();
       this.capturedSet.clear();
+      this.crateEntities.forEach((c) => c.destroy());
+      this.crateEntities.clear();
+      this.pickupEntities.forEach((p) => p.destroy());
+      this.pickupEntities.clear();
       this.debugOverlay?.destroy();
       this.debugOverlay = null;
     });
@@ -539,6 +549,57 @@ export class GameScene extends Phaser.Scene {
       }
       prevSpawned = spawned;
     });
+
+    // --- Crate sync ---
+    room.state.crates.onAdd((crate: any, id: string) => {
+      if (!this.crateEntities.has(id)) {
+        const ent = new Crate(this, id, crate.x, crate.y);
+        this.crateEntities.set(id, ent);
+      }
+    });
+    room.state.crates.onRemove((_c: any, id: string) => {
+      const ent = this.crateEntities.get(id);
+      if (ent) { ent.destroy(); this.crateEntities.delete(id); }
+    });
+
+    // Crate state updates (HP changes)
+    room.onStateChange(() => {
+      (room.state as any).crates?.forEach((c: any, id: string) => {
+        const ent = this.crateEntities.get(id);
+        if (ent && !ent.destroyed) {
+          ent.setHp(c.hp);
+          if (c.destroyed && !ent.destroyed) ent.playDestruction();
+        }
+      });
+    });
+
+    room.onMessage("crateHit", (data: any) => {
+      const ent = this.crateEntities.get(data.crateId);
+      if (ent) ent.flashHit();
+    });
+    room.onMessage("crateDestroyed", (data: any) => {
+      const ent = this.crateEntities.get(data.crateId);
+      if (ent && !ent.destroyed) ent.playDestruction();
+    });
+
+    // --- Pickup sync ---
+    room.state.pickups.onAdd((pk: any, id: string) => {
+      if (!this.pickupEntities.has(id)) {
+        const ent = new Pickup(this, id, pk.x, pk.y, pk.type);
+        this.pickupEntities.set(id, ent);
+      }
+    });
+    room.state.pickups.onRemove((_pk: any, id: string) => {
+      const ent = this.pickupEntities.get(id);
+      if (ent) { ent.destroy(); this.pickupEntities.delete(id); }
+    });
+
+    // --- Interact key (E) ---
+    const eKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.E);
+    eKey.on("down", () => {
+      if (this.matchEnded) return;
+      room.send("interact");
+    });
   }
 
   private onPlayerAdd(p: any, sid: string) {
@@ -699,6 +760,9 @@ export class GameScene extends Phaser.Scene {
 
     // Update checkpoint zone visuals + capture progress bar
     this.updateCheckpoints();
+
+    // Update pickups (bob animation)
+    this.pickupEntities.forEach((pk) => pk.update(delta));
   }
 
   private toggleGrid() {
