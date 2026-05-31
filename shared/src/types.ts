@@ -1,5 +1,14 @@
 export type PlayerId = string;
 export type RoomCode = string;
+export type PlayerRank = "soldier" | "officer" | "major" | "general" | "marshal";
+
+export const RANK_STARS: Record<PlayerRank, number> = {
+  soldier: 1,
+  officer: 2,
+  major: 3,
+  general: 4,
+  marshal: 5,
+};
 
 export interface PlayerInfo {
   id: PlayerId;

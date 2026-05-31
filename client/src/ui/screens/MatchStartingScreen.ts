@@ -31,9 +31,17 @@ export class MatchStartingScreen implements Screen {
       };
       game.events.once("gameSceneReady", this.readyHandler);
 
+      // Get player name from room state
+      const room = ctx.network.getRoom();
+      let playerName = "Player";
+      if (room) {
+        const me = (room.state as any).players?.get(room.sessionId);
+        playerName = me?.name || "Player";
+      }
+
       // Start GameScene (replaces BootScene)
       setTimeout(() => {
-        game.scene.start("GameScene", { deviceProfile: profile });
+        game.scene.start("GameScene", { deviceProfile: profile, playerName });
       }, 100);
     }
 

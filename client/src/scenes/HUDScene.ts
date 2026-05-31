@@ -1,14 +1,15 @@
 import Phaser from "phaser";
 
 export class HUDScene extends Phaser.Scene {
-  private leaveBtn!: Phaser.GameObjects.Text;
+  private hpText!: Phaser.GameObjects.Text;
+  private weaponText!: Phaser.GameObjects.Text;
+  private rankText!: Phaser.GameObjects.Text;
 
   constructor() {
     super("HUDScene");
   }
 
   create() {
-    // HUD camera: fixed, no scroll
     this.cameras.main.setScroll(0, 0);
 
     const W = 1920;
@@ -28,18 +29,37 @@ export class HUDScene extends Phaser.Scene {
       .text(W - 30, 30, "0/0", { fontSize: "20px", color: "#aaa" })
       .setOrigin(1, 0);
 
-    // --- Bottom-left: HP + weapon placeholder ---
-    this.add.rectangle(110, H - 50, 200, 50, 0x000000, 0.5).setStrokeStyle(1, 0x555555);
-    this.add.text(20, H - 65, "HP: 100", { fontSize: "16px", color: "#4caf50" });
-    this.add.text(20, H - 40, "Pistol  30/\u221e", { fontSize: "13px", color: "#aaa" });
+    // --- Bottom-left: HP + weapon ---
+    this.add.rectangle(110, H - 50, 200, 60, 0x000000, 0.5).setStrokeStyle(1, 0x555555);
+    this.hpText = this.add.text(20, H - 72, "HP: 100/100", {
+      fontSize: "16px",
+      color: "#4caf50",
+    });
+    this.weaponText = this.add.text(20, H - 45, "Pistol  30/\u221e", {
+      fontSize: "13px",
+      color: "#aaa",
+    });
 
-    // --- Bottom-right: rank placeholder ---
+    // HP bar
+    this.add.rectangle(110, H - 28, 180, 8, 0x333333).setOrigin(0.5);
+    this.add.rectangle(110, H - 28, 180, 8, 0x44bb44).setOrigin(0.5);
+
+    // --- Bottom-right: rank + kills ---
+    this.rankText = this.add
+      .text(W - 30, H - 60, "Soldier \u2605", {
+        fontSize: "16px",
+        color: "#daa520",
+      })
+      .setOrigin(1, 0);
     this.add
-      .text(W - 30, H - 40, "Soldier \u2605", { fontSize: "16px", color: "#daa520" })
-      .setOrigin(1, 0.5);
+      .text(W - 30, H - 35, "0 / 10 kills", {
+        fontSize: "12px",
+        color: "#888",
+      })
+      .setOrigin(1, 0);
 
     // --- Leave Match button (top-right) ---
-    this.leaveBtn = this.add
+    const leaveBtn = this.add
       .text(W - 20, 70, "\u2715 Leave", {
         fontSize: "16px",
         color: "#ff6666",
@@ -49,7 +69,7 @@ export class HUDScene extends Phaser.Scene {
       .setOrigin(1, 0)
       .setInteractive({ useHandCursor: true });
 
-    this.leaveBtn.on("pointerdown", () => {
+    leaveBtn.on("pointerdown", () => {
       this.game.events.emit("leaveMatch");
     });
   }

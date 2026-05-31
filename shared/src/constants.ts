@@ -7,3 +7,5 @@ export const ROOM_CODE_LENGTH = 6;
 export const ROOM_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 export const ROOM_CODE_CHARSET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 export const VALID_CHECKPOINT_COUNTS = [3, 5, 7] as const;
+export const PLAYER_RUN_SPEED = 300;
+export const PLAYER_RADIUS = 24;
