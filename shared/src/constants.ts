@@ -47,3 +47,5 @@ export const BARREL_CHAIN_DELAY_MS = 100;
 export const BARREL_CARRY_SPEED_MULT = 0.7;
 export const BARREL_CARRY_OFFSET_Y = -30;
 export const BARREL_PICKUP_RANGE = 50;
+export const GRENADE_AOE_RADIUS = 150;
+export const GRENADE_COOLDOWN_MS = 500;

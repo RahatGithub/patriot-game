@@ -978,6 +978,11 @@ export class GameScene extends Phaser.Scene {
           new MuzzleFlash(this, fx, fy);
         }
       }
+
+      // Throw grenade (G key) — separate from weapon slot
+      if (im.grenadePressed && room) {
+        room.send("throwGrenade");
+      }
     }
 
     // Update all players

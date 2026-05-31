@@ -32,6 +32,8 @@ import {
   BARREL_PICKUP_RANGE,
   BARREL_CARRY_SPEED_MULT,
   BARREL_CARRY_OFFSET_Y,
+  GRENADE_AOE_RADIUS,
+  GRENADE_COOLDOWN_MS,
 } from "@patriot/shared";
 import type { RankId } from "@patriot/shared";
 import type { InputCommand, WeaponId, DamageSource, MatchResult } from "@patriot/shared";
@@ -197,6 +199,22 @@ export class PatriotRoom extends Room<RoomStateSchema> {
       this.revivingMap.delete(client.sessionId);
     });
 
+    // Grenade throw handler
+    this.onMessage("throwGrenade", (client) => {
+      if (this.state.matchState !== "in_progress") return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player || player.isDowned || player.isDead) return;
+      if (player.grenadeCount <= 0) return;
+      if (!canUseWeapon(player.rank as RankId, "grenade")) return;
+
+      const now = Date.now();
+      if (now - player.lastGrenadeAt < GRENADE_COOLDOWN_MS) return;
+
+      player.grenadeCount--;
+      player.lastGrenadeAt = now;
+      this.spawnGrenade(player, client.sessionId);
+    });
+
     // Ping handler
     this.onMessage("ping", (client, data: { t: number }) => {
       client.send("pong", { t: data.t });
@@ -300,15 +318,29 @@ export class PatriotRoom extends Room<RoomStateSchema> {
       bullet.y += bullet.vy * (deltaTime / 1000);
 
       const wep = WEAPONS[bullet.weaponId as WeaponId];
-      if (now - bullet.spawnedAt > (wep?.bulletLifetimeMs ?? 1000)) {
+      const isGrenade = bullet.weaponId === "grenade";
+      const expired = now - bullet.spawnedAt > (wep?.bulletLifetimeMs ?? 1000);
+      const oob = bullet.x < 0 || bullet.x > PATRIOT_MAP.width || bullet.y < 0 || bullet.y > PATRIOT_MAP.height;
+      const hitWall = checkWallCollision(bullet.x, bullet.y, wep?.bulletRadius ?? 4);
+
+      // Grenades detonate on wall hit, OOB, or fuse expiry — no direct-hit damage
+      if (isGrenade) {
+        if (expired || hitWall || oob) {
+          this.detonateGrenade(bullet);
+          toRemove.push(id);
+        }
+        return;
+      }
+
+      if (expired) {
         toRemove.push(id);
         return;
       }
-      if (bullet.x < 0 || bullet.x > PATRIOT_MAP.width || bullet.y < 0 || bullet.y > PATRIOT_MAP.height) {
+      if (oob) {
         toRemove.push(id);
         return;
       }
-      if (checkWallCollision(bullet.x, bullet.y, wep?.bulletRadius ?? 4)) {
+      if (hitWall) {
         toRemove.push(id);
         return;
       }
@@ -567,6 +599,43 @@ export class PatriotRoom extends Room<RoomStateSchema> {
 
     // Remove barrel from state after a short delay (let chain trigger)
     this.clock.setTimeout(() => this.state.barrels.delete(barrelId), 200);
+  }
+
+  private spawnGrenade(player: PlayerSchema, sessionId: string) {
+    const grenade = new BulletSchema();
+    grenade.id = `g_${++this.bulletIdCounter}`;
+    grenade.ownerId = sessionId;
+    grenade.weaponId = "grenade";
+    grenade.x = player.x + Math.cos(player.aimAngle) * 30;
+    grenade.y = player.y + Math.sin(player.aimAngle) * 30;
+    grenade.vx = Math.cos(player.aimAngle) * WEAPONS.grenade.bulletSpeed;
+    grenade.vy = Math.sin(player.aimAngle) * WEAPONS.grenade.bulletSpeed;
+    grenade.spawnedAt = Date.now();
+    this.state.bullets.set(grenade.id, grenade);
+
+    // Alert nearby AI
+    this.aiManager.broadcastSound(player.x, player.y);
+  }
+
+  private detonateGrenade(grenade: BulletSchema) {
+    this.broadcast("explosion", {
+      x: grenade.x,
+      y: grenade.y,
+      radius: GRENADE_AOE_RADIUS,
+      source: "grenade_explosion",
+    });
+
+    applyAoE(this, {
+      source: "grenade_explosion",
+      x: grenade.x,
+      y: grenade.y,
+      radius: GRENADE_AOE_RADIUS,
+      attackerId: grenade.ownerId,
+      attackerFaction: this.attackerFactionOf(grenade.ownerId),
+      ignoreFriendlyFire: false,
+    });
+
+    this.aiManager.broadcastSound(grenade.x, grenade.y, "explosion", BARREL_EXPLOSION_RADIUS * 2);
   }
 
   private pickupBarrel(player: PlayerSchema, sessionId: string, barrel: BarrelSchema) {

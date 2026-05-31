@@ -23,9 +23,10 @@ export function applyAoE(room: PatriotRoom, params: AoEParams) {
     const distSq = dx * dx + dy * dy;
     if (distSq > radiusSq) return;
 
-    // Friendly fire check
+    // Friendly fire check: self-damage always applies, teammates skipped unless ignoreFriendlyFire
     const isAttackerHuman = params.attackerFaction === "player";
-    if (isAttackerHuman && !params.ignoreFriendlyFire) return;
+    const isSelf = id === params.attackerId;
+    if (isAttackerHuman && !isSelf && !params.ignoreFriendlyFire) return;
 
     const falloff = 1.0 - Math.sqrt(distSq) / params.radius;
     const baseDmg = getDamage(params.source, "player");

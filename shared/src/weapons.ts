@@ -85,7 +85,7 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     fireMode: "semi",
     fireRatePerSec: 1,
     bulletSpeed: 400,
-    bulletLifetimeMs: 1500,
+    bulletLifetimeMs: 2000,
     bulletRadius: 6,
     damage: 50,
     damageSource: "grenade_explosion",

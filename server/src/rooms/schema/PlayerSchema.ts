@@ -36,4 +36,5 @@ export class PlayerSchema extends Schema {
   @type("number") reviveProgress: number = 0;
   @type("string") reviverIds: string = "";
   @type("string") carriedBarrelId: string = "";
+  @type("number") lastGrenadeAt: number = 0;
 }
