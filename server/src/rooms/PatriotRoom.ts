@@ -13,6 +13,7 @@ import {
   getDamage,
   PLAYER_HITBOX_RADIUS,
   DOWNED_TIMEOUT_MS,
+  AI_RADIUS,
 } from "@patriot/shared";
 import type { InputCommand, WeaponId, DamageSource } from "@patriot/shared";
 import { RoomStateSchema } from "./schema/RoomStateSchema.js";
@@ -21,12 +22,14 @@ import { BulletSchema } from "./schema/BulletSchema.js";
 import { generateRoomCode } from "../utils/roomCode.js";
 import { registerRoom, unregisterRoom } from "../utils/roomRegistry.js";
 import { checkWallCollision, clampToMap } from "../systems/collision.js";
+import { AIManager } from "../ai/AIManager.js";
 
 export class PatriotRoom extends Room<RoomStateSchema> {
   maxClients = MAX_PLAYERS_PER_ROOM;
   private playerInputs = new Map<string, InputCommand[]>();
   private bulletIdCounter = 0;
   private allowFriendlyFire = process.env.ALLOW_FF === "1";
+  private aiManager!: AIManager;
 
   onCreate(options: any) {
     const checkpointCount = VALID_CHECKPOINT_COUNTS.includes(options.checkpointCount)
@@ -42,6 +45,8 @@ export class PatriotRoom extends Room<RoomStateSchema> {
     this.state.creatorId = "";
 
     registerRoom(code, this.roomId);
+
+    this.aiManager = new AIManager(this.state);
 
     // Simulation loop at 20Hz
     this.setSimulationInterval((dt) => this.tick(dt), TICK_INTERVAL_MS);
@@ -124,6 +129,7 @@ export class PatriotRoom extends Room<RoomStateSchema> {
 
       this.state.matchStarted = true;
       this.broadcast(ServerMessage.MATCH_STARTED);
+      this.aiManager.spawnInitial();
       console.log(`[Room ${this.state.code}] Match started`);
     });
 
@@ -168,12 +174,11 @@ export class PatriotRoom extends Room<RoomStateSchema> {
         return;
       }
       // Player hit detection
-      let hitPlayer = false;
+      let hit = false;
       this.state.players.forEach((target, targetId) => {
-        if (hitPlayer) return;
-        if (targetId === bullet.ownerId) return; // no self-hit
+        if (hit) return;
+        if (targetId === bullet.ownerId) return;
         if (target.isDowned || target.isDead) return;
-        // Friendly fire check (all humans in v1.0)
         if (!this.allowFriendlyFire) return;
 
         const dx = bullet.x - target.x;
@@ -183,9 +188,26 @@ export class PatriotRoom extends Room<RoomStateSchema> {
         if (distSq < r * r) {
           this.applyDamageToPlayer(target, bullet, targetId);
           toRemove.push(id);
-          hitPlayer = true;
+          hit = true;
         }
       });
+
+      // AI hit detection (player bullets damage mafia)
+      if (!hit && !bullet.ownerId.startsWith("ai_")) {
+        this.state.ai.forEach((ai, aiId) => {
+          if (hit) return;
+          if (ai.isDead) return;
+          const dx = bullet.x - ai.x;
+          const dy = bullet.y - ai.y;
+          const distSq = dx * dx + dy * dy;
+          const r = AI_RADIUS + (wep?.bulletRadius ?? 4);
+          if (distSq < r * r) {
+            this.applyDamageToAI(ai, bullet, aiId);
+            toRemove.push(id);
+            hit = true;
+          }
+        });
+      }
     });
     for (const id of toRemove) {
       this.state.bullets.delete(id);
@@ -201,6 +223,39 @@ export class PatriotRoom extends Room<RoomStateSchema> {
         }
       }
     });
+
+    // AI update
+    this.aiManager.update(deltaTime);
+  }
+
+  private applyDamageToAI(
+    ai: import("./schema/AISchema.js").AISchema,
+    bullet: { ownerId: string; weaponId: string },
+    aiId: string
+  ) {
+    if (ai.isDead) return;
+    const wep = WEAPONS[bullet.weaponId as WeaponId];
+    const dmg = wep ? getDamage(wep.damageSource, "player") : 5;
+    ai.hp = Math.max(0, ai.hp - dmg);
+
+    this.broadcast("damage", {
+      targetId: aiId,
+      attackerId: bullet.ownerId,
+      amount: dmg,
+      x: ai.x,
+      y: ai.y,
+      source: wep?.damageSource ?? "pistol_bullet",
+    });
+
+    if (ai.hp <= 0) {
+      ai.isDead = true;
+      ai.behaviorState = "dead";
+      ai.deathTime = Date.now();
+      this.broadcast("aiKilled", { aiId, killerId: bullet.ownerId, x: ai.x, y: ai.y });
+      const killer = this.state.players.get(bullet.ownerId);
+      if (killer) killer.kills++;
+      console.log(`[Room ${this.state.code}] Mafia killed by ${killer?.name || bullet.ownerId}`);
+    }
   }
 
   private applyDamageToPlayer(

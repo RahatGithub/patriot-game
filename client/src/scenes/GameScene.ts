@@ -17,6 +17,7 @@ import { MuzzleFlash } from "../effects/MuzzleFlash.js";
 import type { NetworkManager } from "../network/NetworkManager.js";
 import { checkWallCollisionClient } from "../systems/collisionClient.js";
 import { BloodSplatter } from "../effects/BloodSplatter.js";
+import { AIEntity } from "../entities/AIEntity.js";
 
 const FREE_CAM_SPEED = 600;
 
@@ -36,6 +37,7 @@ export class GameScene extends Phaser.Scene {
   private freeCamKeys!: Record<string, Phaser.Input.Keyboard.Key>;
   private networkManager: NetworkManager | null = null;
   private bullets = new Map<string, Bullet>();
+  private aiEntities = new Map<string, AIEntity>();
   private lastFireTime = 0;
   private sessionId = "";
   private stateSetup = false;
@@ -51,6 +53,9 @@ export class GameScene extends Phaser.Scene {
 
   preload() {
     this.load.image("soldier_patriot", "/assets/sprites/characters/soldier_patriot.png");
+    this.load.image("mafia_mk18", "/assets/sprites/characters/mafia_mk18.png");
+    this.load.image("mafia_pistol", "/assets/sprites/characters/mafia_pistol.png");
+    this.load.image("mafia_mg", "/assets/sprites/characters/mafia_mg.png");
     this.load.on("loaderror", (file: any) => {
       console.warn(`[GameScene] Asset not found: ${file.key} — using placeholder`);
     });
@@ -200,6 +205,8 @@ export class GameScene extends Phaser.Scene {
       this.remotePlayers.clear();
       this.bullets.forEach((b) => b.destroy());
       this.bullets.clear();
+      this.aiEntities.forEach((a) => a.destroy());
+      this.aiEntities.clear();
       this.debugOverlay?.destroy();
       this.debugOverlay = null;
     });
@@ -287,6 +294,16 @@ export class GameScene extends Phaser.Scene {
           this.bullets.delete(id);
         }
       });
+
+      // Sync AI
+      room.state.ai.forEach((ai: any, id: string) => {
+        const ent = this.aiEntities.get(id);
+        if (ent) {
+          ent.pushSnapshot(ai.x, ai.y, ai.aimAngle);
+          ent.setHp(ai.hp);
+          if (ai.isDead && !ent.isDead) ent.setDead();
+        }
+      });
     });
 
     // Bullet add/remove listeners
@@ -345,6 +362,37 @@ export class GameScene extends Phaser.Scene {
           ? this.localPlayer
           : this.remotePlayers.get(victimId);
       player?.setDead(true);
+    });
+
+    // Also handle AI damage hit flash
+    room.onMessage("damage", (data: any) => {
+      const ai = this.aiEntities.get(data.targetId);
+      if (ai) ai.flashHit();
+    });
+
+    // AI killed
+    room.onMessage("aiKilled", (data: any) => {
+      const ai = this.aiEntities.get(data.aiId);
+      if (ai) {
+        ai.setDead();
+        new BloodSplatter(this, data.x, data.y);
+      }
+    });
+
+    // --- AI entity sync ---
+    room.state.ai.onAdd((ai: any, id: string) => {
+      if (!this.aiEntities.has(id)) {
+        const ent = new AIEntity(this, id, ai.x, ai.y, ai.weapon);
+        this.aiEntities.set(id, ent);
+      }
+    });
+
+    room.state.ai.onRemove((_ai: any, id: string) => {
+      const ent = this.aiEntities.get(id);
+      if (ent) {
+        ent.destroy();
+        this.aiEntities.delete(id);
+      }
     });
   }
 
@@ -493,6 +541,12 @@ export class GameScene extends Phaser.Scene {
     this.remotePlayers.forEach((p) => {
       p.interpolate();
       p.update(delta);
+    });
+
+    // Update AI
+    this.aiEntities.forEach((ai) => {
+      ai.interpolate();
+      ai.update();
     });
   }
 

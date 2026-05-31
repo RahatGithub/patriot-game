@@ -11,3 +11,7 @@ export const PLAYER_RUN_SPEED = 300;
 export const PLAYER_RADIUS = 24;
 export const INTERPOLATION_DELAY_MS = 100;
 export const RECONCILIATION_THRESHOLD = 5;
+export const AI_WALK_SPEED = 100;
+export const AI_RUN_SPEED = 250;
+export const AI_RADIUS = 22;
+export const AI_INITIAL_HP = 50;

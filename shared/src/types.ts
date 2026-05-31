@@ -42,6 +42,27 @@ export interface PlayerStateSnapshot {
   lastProcessedInput: number;
 }
 
+// AI types
+export type AIFaction = "patriot" | "mafia";
+export type AIBehaviorState = "patrol" | "alert" | "chase" | "dead";
+
+export interface PatrolWaypoint {
+  x: number;
+  y: number;
+}
+
+export interface PatrolPath {
+  id: string;
+  waypoints: PatrolWaypoint[];
+  loop: boolean;
+}
+
+export interface AISpawnDef {
+  spawnPointIndex: number;
+  patrolPathId: string;
+  weapon: "pistol" | "mk18" | "mg";
+}
+
 export interface LobbyState {
   code: RoomCode;
   creatorId: PlayerId;

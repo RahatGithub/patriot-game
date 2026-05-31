@@ -53,6 +53,8 @@ export interface SpawnZone {
   height: number;
 }
 
+import type { PatrolPath, AISpawnDef } from "./types.js";
+
 export interface MapDefinition {
   width: number;
   height: number;
@@ -62,6 +64,8 @@ export interface MapDefinition {
   playerSpawn: SpawnZone;
   enemySpawnPoints: { x: number; y: number }[];
   waterPools: { x: number; y: number; width: number; height: number }[];
+  patrolPaths: PatrolPath[];
+  initialAISpawns: AISpawnDef[];
 }
 
 export const PATRIOT_MAP: MapDefinition = {
@@ -199,5 +203,40 @@ export const PATRIOT_MAP: MapDefinition = {
     { x: 1350, y: 150, width: 350, height: 250 },
     { x: 1850, y: 350, width: 200, height: 200 },
     { x: 1450, y: 550, width: 150, height: 120 },
+  ],
+
+  patrolPaths: [
+    // Outdoor 1 paths
+    { id: "p1", loop: true, waypoints: [{ x: 600, y: 200 }, { x: 900, y: 200 }, { x: 900, y: 500 }, { x: 600, y: 500 }] },
+    { id: "p2", loop: false, waypoints: [{ x: 200, y: 600 }, { x: 500, y: 600 }, { x: 500, y: 900 }, { x: 200, y: 900 }] },
+    // Pool area paths
+    { id: "p3", loop: true, waypoints: [{ x: 1300, y: 100 }, { x: 1700, y: 100 }, { x: 1700, y: 700 }, { x: 1300, y: 700 }] },
+    { id: "p4", loop: false, waypoints: [{ x: 1900, y: 150 }, { x: 2100, y: 150 }, { x: 2100, y: 600 }] },
+    // Indoor building paths
+    { id: "p5", loop: true, waypoints: [{ x: 2500, y: 300 }, { x: 2700, y: 300 }, { x: 2700, y: 600 }, { x: 2500, y: 600 }] },
+    { id: "p6", loop: false, waypoints: [{ x: 2900, y: 300 }, { x: 3400, y: 300 }, { x: 3400, y: 600 }, { x: 2900, y: 600 }] },
+    { id: "p7", loop: true, waypoints: [{ x: 2500, y: 1000 }, { x: 2700, y: 1000 }, { x: 2700, y: 1400 }, { x: 2500, y: 1400 }] },
+    // Outdoor 2 paths
+    { id: "p8", loop: false, waypoints: [{ x: 1400, y: 900 }, { x: 1800, y: 900 }, { x: 1800, y: 1200 }] },
+    { id: "p9", loop: true, waypoints: [{ x: 1500, y: 1600 }, { x: 2000, y: 1600 }, { x: 2000, y: 2000 }, { x: 1500, y: 2000 }] },
+    // Basement paths
+    { id: "p10", loop: true, waypoints: [{ x: 2500, y: 1900 }, { x: 2900, y: 1900 }, { x: 2900, y: 2300 }, { x: 2500, y: 2300 }] },
+    { id: "p11", loop: false, waypoints: [{ x: 3100, y: 1900 }, { x: 3700, y: 1900 }, { x: 3700, y: 2800 }, { x: 3100, y: 2800 }] },
+    { id: "p12", loop: true, waypoints: [{ x: 2600, y: 2500 }, { x: 3000, y: 2500 }, { x: 3000, y: 2800 }, { x: 2600, y: 2800 }] },
+  ],
+
+  initialAISpawns: [
+    { spawnPointIndex: 0, patrolPathId: "p1", weapon: "mk18" },
+    { spawnPointIndex: 1, patrolPathId: "p2", weapon: "pistol" },
+    { spawnPointIndex: 2, patrolPathId: "p3", weapon: "mk18" },
+    { spawnPointIndex: 3, patrolPathId: "p4", weapon: "pistol" },
+    { spawnPointIndex: 4, patrolPathId: "p5", weapon: "mk18" },
+    { spawnPointIndex: 5, patrolPathId: "p6", weapon: "mk18" },
+    { spawnPointIndex: 6, patrolPathId: "p7", weapon: "pistol" },
+    { spawnPointIndex: 7, patrolPathId: "p8", weapon: "mk18" },
+    { spawnPointIndex: 8, patrolPathId: "p9", weapon: "mg" },
+    { spawnPointIndex: 9, patrolPathId: "p10", weapon: "mk18" },
+    { spawnPointIndex: 10, patrolPathId: "p11", weapon: "mg" },
+    { spawnPointIndex: 11, patrolPathId: "p12", weapon: "mk18" },
   ],
 };
