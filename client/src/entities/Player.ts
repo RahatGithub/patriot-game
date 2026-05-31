@@ -127,6 +127,43 @@ export class Player {
     this.nameLabel.setText(`${this.name} ${stars}`);
   }
 
+  /** Apply downed visual state */
+  setDowned(downed: boolean) {
+    this.isDowned = downed;
+    if (downed) {
+      this.sprite.rotation = this.aimAngle + Math.PI;
+      (this.sprite as any).setTint?.(0xff5555);
+      this.nameLabel.setColor("#888");
+      this.hpBarFg.width = 0;
+    } else {
+      (this.sprite as any).clearTint?.();
+      this.nameLabel.setColor(this.isLocal ? "#fff" : "#ccc");
+    }
+  }
+
+  /** Apply dead visual state */
+  setDead(dead: boolean) {
+    if (dead) {
+      this.sprite.setAlpha(0.3);
+      (this.sprite as any).setTint?.(0x666666);
+      this.nameLabel.setVisible(false);
+      this.hpBarBg.setVisible(false);
+      this.hpBarFg.setVisible(false);
+    }
+  }
+
+  /** Brief red tint flash on hit */
+  flashHit() {
+    (this.sprite as any).setTint?.(0xff0000);
+    this.scene.time.delayedCall(150, () => {
+      if (this.isDowned) {
+        (this.sprite as any).setTint?.(0xff5555);
+      } else {
+        (this.sprite as any).clearTint?.();
+      }
+    });
+  }
+
   /** Set position directly (for server reconciliation) */
   setPosition(x: number, y: number) {
     this.sprite.setPosition(x, y);

@@ -1,3 +1,5 @@
+import type { DamageSource } from "./damage.js";
+
 export type WeaponId = "pistol" | "mk18" | "mg" | "bazooka" | "grenade";
 
 export interface WeaponDef {
@@ -8,6 +10,7 @@ export interface WeaponDef {
   bulletLifetimeMs: number;
   bulletRadius: number;
   damage: number;
+  damageSource: DamageSource;
   rankRequired: number;
   ammo: number | "unlimited";
   spread: number;
@@ -23,8 +26,9 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     bulletLifetimeMs: 1000,
     bulletRadius: 4,
     damage: 5,
+    damageSource: "pistol_bullet",
     rankRequired: 1,
-    ammo: 30, // TODO: enforce limited starting ammo in Prompt 19
+    ammo: 30,
     spread: 0.02,
     projectileColor: "#FFD700",
   },
@@ -36,6 +40,7 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     bulletLifetimeMs: 1200,
     bulletRadius: 4,
     damage: 10,
+    damageSource: "mk18_bullet",
     rankRequired: 2,
     ammo: "unlimited",
     spread: 0.04,
@@ -49,6 +54,7 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     bulletLifetimeMs: 1200,
     bulletRadius: 5,
     damage: 12,
+    damageSource: "mg_bullet",
     rankRequired: 4,
     ammo: "unlimited",
     spread: 0.08,
@@ -62,6 +68,7 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     bulletLifetimeMs: 2000,
     bulletRadius: 8,
     damage: 40,
+    damageSource: "bazooka_rocket",
     rankRequired: 5,
     ammo: 3,
     spread: 0,
@@ -75,6 +82,7 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     bulletLifetimeMs: 1500,
     bulletRadius: 6,
     damage: 50,
+    damageSource: "grenade_explosion",
     rankRequired: 3,
     ammo: 3,
     spread: 0,

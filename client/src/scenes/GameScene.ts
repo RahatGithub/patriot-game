@@ -16,6 +16,7 @@ import { Bullet } from "../entities/Bullet.js";
 import { MuzzleFlash } from "../effects/MuzzleFlash.js";
 import type { NetworkManager } from "../network/NetworkManager.js";
 import { checkWallCollisionClient } from "../systems/collisionClient.js";
+import { BloodSplatter } from "../effects/BloodSplatter.js";
 
 const FREE_CAM_SPEED = 600;
 
@@ -235,11 +236,18 @@ export class GameScene extends Phaser.Scene {
       room.state.players.forEach((p: any, sid: string) => {
         if (sid === this.sessionId) {
           this.reconcileLocal(p);
+          if (this.localPlayer) {
+            this.localPlayer.setHp(p.hp);
+            if (p.isDowned && !this.localPlayer.isDowned) this.localPlayer.setDowned(true);
+            if (p.isDead) this.localPlayer.setDead(true);
+          }
         } else {
           const remote = this.remotePlayers.get(sid);
           if (remote) {
             remote.pushSnapshot(p.x, p.y, p.aimAngle);
             remote.setHp(p.hp);
+            if (p.isDowned && !remote.isDowned) remote.setDowned(true);
+            if (p.isDead) remote.setDead(true);
           }
         }
       });
@@ -287,6 +295,45 @@ export class GameScene extends Phaser.Scene {
         bv.destroy();
         this.bullets.delete(id);
       }
+    });
+
+    // Damage event — hit effects
+    room.onMessage("damage", (data: any) => {
+      const { targetId, x, y } = data;
+      // Blood splatter at hit position
+      new BloodSplatter(this, x, y);
+
+      // Flash the hit player's sprite
+      const target =
+        targetId === this.sessionId
+          ? this.localPlayer
+          : this.remotePlayers.get(targetId);
+      target?.flashHit();
+
+      // Local player hit: screen flash + camera shake
+      if (targetId === this.sessionId) {
+        this.cameras.main.shake(100, 0.005);
+      }
+    });
+
+    // Player downed event
+    room.onMessage("playerDowned", (data: any) => {
+      const { victimId } = data;
+      const player =
+        victimId === this.sessionId
+          ? this.localPlayer
+          : this.remotePlayers.get(victimId);
+      player?.setDowned(true);
+    });
+
+    // Player died event
+    room.onMessage("playerDied", (data: any) => {
+      const { victimId } = data;
+      const player =
+        victimId === this.sessionId
+          ? this.localPlayer
+          : this.remotePlayers.get(victimId);
+      player?.setDead(true);
     });
   }
 
@@ -381,7 +428,7 @@ export class GameScene extends Phaser.Scene {
       if (this.freeCamKeys.D.isDown) cam.scrollX += spd;
       if (this.freeCamKeys.W.isDown) cam.scrollY -= spd;
       if (this.freeCamKeys.S.isDown) cam.scrollY += spd;
-    } else if (this.localPlayer && this.networkManager) {
+    } else if (this.localPlayer && this.networkManager && !this.localPlayer.isDowned) {
       const im = this.inputManager;
       const body = this.localPlayer.sprite.body as Phaser.Physics.Arcade.Body;
 

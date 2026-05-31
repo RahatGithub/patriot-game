@@ -10,8 +10,11 @@ import {
   ServerMessage,
   PATRIOT_MAP,
   WEAPONS,
+  getDamage,
+  PLAYER_HITBOX_RADIUS,
+  DOWNED_TIMEOUT_MS,
 } from "@patriot/shared";
-import type { InputCommand, WeaponId } from "@patriot/shared";
+import type { InputCommand, WeaponId, DamageSource } from "@patriot/shared";
 import { RoomStateSchema } from "./schema/RoomStateSchema.js";
 import { PlayerSchema } from "./schema/PlayerSchema.js";
 import { BulletSchema } from "./schema/BulletSchema.js";
@@ -23,6 +26,7 @@ export class PatriotRoom extends Room<RoomStateSchema> {
   maxClients = MAX_PLAYERS_PER_ROOM;
   private playerInputs = new Map<string, InputCommand[]>();
   private bulletIdCounter = 0;
+  private allowFriendlyFire = process.env.ALLOW_FF === "1";
 
   onCreate(options: any) {
     const checkpointCount = VALID_CHECKPOINT_COUNTS.includes(options.checkpointCount)
@@ -56,7 +60,7 @@ export class PatriotRoom extends Room<RoomStateSchema> {
     // Fire handler
     this.onMessage("fire", (client, data: { aimAngle: number }) => {
       const player = this.state.players.get(client.sessionId);
-      if (!player || player.isDowned) return;
+      if (!player || player.isDowned || player.isDead) return;
 
       const wep = WEAPONS[player.currentWeapon as WeaponId];
       if (!wep) return;
@@ -125,7 +129,10 @@ export class PatriotRoom extends Room<RoomStateSchema> {
       if (!inputs || inputs.length === 0) return;
 
       for (const input of inputs) {
-        this.applyInput(player, input, deltaTime);
+        // Skip movement for downed/dead players
+        if (!player.isDowned && !player.isDead) {
+          this.applyInput(player, input, deltaTime);
+        }
         player.lastProcessedInput = input.sequence;
       }
       inputs.length = 0;
@@ -151,10 +158,75 @@ export class PatriotRoom extends Room<RoomStateSchema> {
         toRemove.push(id);
         return;
       }
-      // Player hit detection → Prompt 10
+      // Player hit detection
+      let hitPlayer = false;
+      this.state.players.forEach((target, targetId) => {
+        if (hitPlayer) return;
+        if (targetId === bullet.ownerId) return; // no self-hit
+        if (target.isDowned || target.isDead) return;
+        // Friendly fire check (all humans in v1.0)
+        if (!this.allowFriendlyFire) return;
+
+        const dx = bullet.x - target.x;
+        const dy = bullet.y - target.y;
+        const distSq = dx * dx + dy * dy;
+        const r = PLAYER_HITBOX_RADIUS + (wep?.bulletRadius ?? 4);
+        if (distSq < r * r) {
+          this.applyDamageToPlayer(target, bullet, targetId);
+          toRemove.push(id);
+          hitPlayer = true;
+        }
+      });
     });
     for (const id of toRemove) {
       this.state.bullets.delete(id);
+    }
+
+    // Downed → permadeath timer
+    this.state.players.forEach((p, pid) => {
+      if (p.isDowned && !p.isDead) {
+        if (now - p.downedAt > DOWNED_TIMEOUT_MS) {
+          p.isDead = true;
+          p.deaths++;
+          this.broadcast("playerDied", { victimId: pid });
+        }
+      }
+    });
+  }
+
+  private applyDamageToPlayer(
+    target: PlayerSchema,
+    bullet: { ownerId: string; weaponId: string; x: number; y: number },
+    targetId: string
+  ) {
+    if (target.isDowned || target.isDead) return;
+
+    const wep = WEAPONS[bullet.weaponId as WeaponId];
+    const dmg = wep ? getDamage(wep.damageSource, "player") : 5;
+    target.hp = Math.max(0, target.hp - dmg);
+
+    this.broadcast("damage", {
+      targetId,
+      attackerId: bullet.ownerId,
+      amount: dmg,
+      x: target.x,
+      y: target.y,
+      source: wep?.damageSource ?? "pistol_bullet",
+    });
+
+    if (target.hp <= 0) {
+      target.isDowned = true;
+      target.hp = 0;
+      target.downedAt = Date.now();
+      target.downedBy = bullet.ownerId;
+
+      const killer = this.state.players.get(bullet.ownerId);
+      if (killer) killer.kills++;
+
+      this.broadcast("playerDowned", {
+        victimId: targetId,
+        killerId: bullet.ownerId,
+      });
     }
   }
 
