@@ -40,6 +40,11 @@ import {
   JEEP_SPEED,
   JEEP_ROTATION_SPEED,
   JEEP_RADIUS,
+  TRUCK_HP,
+  TRUCK_SPEED,
+  TRUCK_ROTATION_SPEED,
+  TRUCK_CAPACITY,
+  TRUCK_RADIUS,
 } from "@patriot/shared";
 import type { RankId } from "@patriot/shared";
 import type { InputCommand, WeaponId, DamageSource, MatchResult } from "@patriot/shared";
@@ -508,9 +513,11 @@ export class PatriotRoom extends Room<RoomStateSchema> {
           if (hit || vehicle.destroyed) return;
           // Don't damage your own vehicle while inside it
           if (vehicle.driverId === bullet.ownerId) return;
+          if (vehicle.passengerIds.indexOf(bullet.ownerId) !== -1) return;
           const dx = bullet.x - vehicle.x;
           const dy = bullet.y - vehicle.y;
-          const r = JEEP_RADIUS + (wep?.bulletRadius ?? 4);
+          const vRadius = vehicle.type === "truck" ? TRUCK_RADIUS : JEEP_RADIUS;
+          const r = vRadius + (wep?.bulletRadius ?? 4);
           if (dx * dx + dy * dy < r * r) {
             const target = vehicle.type as DamageTarget;
             const dmg = wep ? getDamage(wep.damageSource, target) : 2;
@@ -681,7 +688,7 @@ export class PatriotRoom extends Room<RoomStateSchema> {
       v.x = def.x;
       v.y = def.y;
       v.rotation = def.rotation ?? 0;
-      v.hp = def.type === "jeep" ? JEEP_HP : def.type === "truck" ? 80 : 120;
+      v.hp = def.type === "jeep" ? JEEP_HP : def.type === "truck" ? TRUCK_HP : 120;
       this.state.vehicles.set(v.id, v);
     });
     console.log(`[Room ${this.state.code}] Initialized ${PATRIOT_MAP.vehicles.length} vehicles`);
@@ -689,12 +696,29 @@ export class PatriotRoom extends Room<RoomStateSchema> {
 
   private enterVehicle(player: PlayerSchema, sessionId: string, vehicle: VehicleSchema) {
     if (player.carriedBarrelId) return;
-    if (vehicle.driverId) return;
-    vehicle.driverId = sessionId;
-    player.inVehicleId = vehicle.id;
-    player.x = vehicle.x;
-    player.y = vehicle.y;
-    this.broadcast("vehicleEntered", { vehicleId: vehicle.id, playerId: sessionId, role: "driver" });
+
+    if (vehicle.type === "jeep") {
+      if (vehicle.driverId) return;
+      vehicle.driverId = sessionId;
+      player.inVehicleId = vehicle.id;
+      player.x = vehicle.x;
+      player.y = vehicle.y;
+      this.broadcast("vehicleEntered", { vehicleId: vehicle.id, playerId: sessionId, role: "driver" });
+    } else if (vehicle.type === "truck") {
+      if (!vehicle.driverId) {
+        vehicle.driverId = sessionId;
+        player.inVehicleId = vehicle.id;
+        player.x = vehicle.x;
+        player.y = vehicle.y;
+        this.broadcast("vehicleEntered", { vehicleId: vehicle.id, playerId: sessionId, role: "driver" });
+      } else if (vehicle.passengerIds.length < TRUCK_CAPACITY - 1) {
+        vehicle.passengerIds.push(sessionId);
+        player.inVehicleId = vehicle.id;
+        player.x = vehicle.x;
+        player.y = vehicle.y;
+        this.broadcast("vehicleEntered", { vehicleId: vehicle.id, playerId: sessionId, role: "passenger" });
+      }
+    }
   }
 
   private exitVehicle(player: PlayerSchema, sessionId: string) {
@@ -703,13 +727,23 @@ export class PatriotRoom extends Room<RoomStateSchema> {
       player.inVehicleId = "";
       return;
     }
-    const angle = vehicle.rotation + Math.PI / 2;
-    const exitX = vehicle.x + Math.cos(angle) * 50;
-    const exitY = vehicle.y + Math.sin(angle) * 50;
+
+    let angle: number;
+    if (vehicle.driverId === sessionId) {
+      vehicle.driverId = "";
+      angle = vehicle.rotation;
+    } else {
+      const idx = vehicle.passengerIds.indexOf(sessionId);
+      if (idx !== -1) vehicle.passengerIds.splice(idx, 1);
+      const sideAngles = [Math.PI / 2, -Math.PI / 2, Math.PI];
+      angle = vehicle.rotation + sideAngles[Math.max(0, idx) % 3];
+    }
+
+    const exitX = vehicle.x + Math.cos(angle) * 55;
+    const exitY = vehicle.y + Math.sin(angle) * 55;
     player.x = checkWallCollision(exitX, exitY, PLAYER_RADIUS) ? vehicle.x : exitX;
     player.y = checkWallCollision(exitX, exitY, PLAYER_RADIUS) ? vehicle.y : exitY;
 
-    if (vehicle.driverId === sessionId) vehicle.driverId = "";
     player.inVehicleId = "";
     this.broadcast("vehicleExited", { vehicleId: vehicle.id, playerId: sessionId });
   }
@@ -720,7 +754,10 @@ export class PatriotRoom extends Room<RoomStateSchema> {
     const mag = Math.sqrt(mx * mx + my * my);
     if (mag > 1) { mx /= mag; my /= mag; }
 
-    const speed = JEEP_SPEED;
+    const speed = vehicle.type === "truck" ? TRUCK_SPEED : JEEP_SPEED;
+    const rotSpeed = vehicle.type === "truck" ? TRUCK_ROTATION_SPEED : JEEP_ROTATION_SPEED;
+    const radius = vehicle.type === "truck" ? TRUCK_RADIUS : JEEP_RADIUS;
+
     const targetVx = mx * speed;
     const targetVy = my * speed;
 
@@ -730,13 +767,13 @@ export class PatriotRoom extends Room<RoomStateSchema> {
     const newX = vehicle.x + vehicle.vx * (dt / 1000);
     const newY = vehicle.y + vehicle.vy * (dt / 1000);
 
-    if (!checkWallCollision(newX, newY, JEEP_RADIUS)) {
+    if (!checkWallCollision(newX, newY, radius)) {
       vehicle.x = newX;
       vehicle.y = newY;
-    } else if (!checkWallCollision(newX, vehicle.y, JEEP_RADIUS)) {
+    } else if (!checkWallCollision(newX, vehicle.y, radius)) {
       vehicle.x = newX;
       vehicle.vy *= 0.5;
-    } else if (!checkWallCollision(vehicle.x, newY, JEEP_RADIUS)) {
+    } else if (!checkWallCollision(vehicle.x, newY, radius)) {
       vehicle.y = newY;
       vehicle.vx *= 0.5;
     } else {
@@ -745,8 +782,8 @@ export class PatriotRoom extends Room<RoomStateSchema> {
     }
 
     // Clamp to map
-    vehicle.x = Math.max(JEEP_RADIUS, Math.min(PATRIOT_MAP.width - JEEP_RADIUS, vehicle.x));
-    vehicle.y = Math.max(JEEP_RADIUS, Math.min(PATRIOT_MAP.height - JEEP_RADIUS, vehicle.y));
+    vehicle.x = Math.max(radius, Math.min(PATRIOT_MAP.width - radius, vehicle.x));
+    vehicle.y = Math.max(radius, Math.min(PATRIOT_MAP.height - radius, vehicle.y));
 
     // Rotation follows velocity
     if (Math.abs(vehicle.vx) > 5 || Math.abs(vehicle.vy) > 5) {
@@ -754,7 +791,7 @@ export class PatriotRoom extends Room<RoomStateSchema> {
       let diff = targetRot - vehicle.rotation;
       while (diff > Math.PI) diff -= 2 * Math.PI;
       while (diff < -Math.PI) diff += 2 * Math.PI;
-      vehicle.rotation += Math.sign(diff) * Math.min(Math.abs(diff), JEEP_ROTATION_SPEED * (dt / 1000));
+      vehicle.rotation += Math.sign(diff) * Math.min(Math.abs(diff), rotSpeed * (dt / 1000));
     }
   }
 
@@ -772,6 +809,17 @@ export class PatriotRoom extends Room<RoomStateSchema> {
       }
       vehicle.driverId = "";
     }
+
+    // Eject passengers with heavy damage
+    vehicle.passengerIds.forEach((pid) => {
+      const passenger = this.state.players.get(pid);
+      if (passenger) {
+        passenger.inVehicleId = "";
+        passenger.hp = Math.max(0, passenger.hp - 50);
+        if (passenger.hp <= 0) this.downPlayer(passenger, pid, killerId);
+      }
+    });
+    vehicle.passengerIds.clear();
 
     // Small explosion
     this.broadcast("explosion", { x: vehicle.x, y: vehicle.y, radius: 100, source: "barrel_explosion" });

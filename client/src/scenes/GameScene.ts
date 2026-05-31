@@ -1500,7 +1500,7 @@ export class GameScene extends Phaser.Scene {
       padding:6px 16px; color:#88cc66; font-family:monospace; font-size:13px;
       z-index:1000; pointer-events:none; white-space:nowrap;
     `;
-    el.textContent = "DRIVING: JEEP \u2014 Press E to exit";
+    el.textContent = "DRIVING \u2014 Press E to exit";
     document.body.appendChild(el);
     this.vehicleHud = el;
   }
@@ -1526,7 +1526,12 @@ export class GameScene extends Phaser.Scene {
     let closestDist = VEHICLE_INTERACT_RANGE;
     let closestVehicle: any = null;
     (room.state as any).vehicles?.forEach((v: any) => {
-      if (v.destroyed || v.driverId) return;
+      if (v.destroyed) return;
+      // For trucks: allow boarding if not full
+      const isFull = v.type === "jeep" ? !!v.driverId
+        : v.type === "truck" ? (!!v.driverId && (v.passengerIds?.length ?? 0) >= 3)
+        : !!v.driverId;
+      if (isFull) return;
       const dx = this.localPlayer!.sprite.x - v.x;
       const dy = this.localPlayer!.sprite.y - v.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
@@ -1537,6 +1542,9 @@ export class GameScene extends Phaser.Scene {
       const cam = this.cameras.main;
       const sx = (closestVehicle.x - cam.scrollX) * cam.zoom;
       const sy = (closestVehicle.y - cam.scrollY) * cam.zoom;
+      const vType = closestVehicle.type?.charAt(0).toUpperCase() + closestVehicle.type?.slice(1);
+      const hasDriver = !!closestVehicle.driverId;
+      const label = hasDriver ? `Press E to ride along (${vType})` : `Press E to enter ${vType}`;
       if (!this.vehiclePromptEl) {
         const el = document.createElement("div");
         el.id = "vehicle-prompt";
@@ -1546,10 +1554,10 @@ export class GameScene extends Phaser.Scene {
           padding:4px 12px; color:#88cc66; font-family:monospace; font-size:11px;
           z-index:1000; pointer-events:none; white-space:nowrap;
         `;
-        el.textContent = "Press E to enter Jeep";
         document.body.appendChild(el);
         this.vehiclePromptEl = el;
       }
+      this.vehiclePromptEl.textContent = label;
       this.vehiclePromptEl.style.left = `${sx}px`;
       this.vehiclePromptEl.style.top = `${sy - 50}px`;
     } else {

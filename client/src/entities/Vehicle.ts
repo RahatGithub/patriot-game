@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { JEEP_HP } from "@patriot/shared";
+import { JEEP_HP, TRUCK_HP } from "@patriot/shared";
 
 const HP_BAR_W = 50;
 const HP_BAR_H = 5;
@@ -30,20 +30,22 @@ export class Vehicle {
     this.x = x;
     this.y = y;
     this.rotation = rotation;
-    this.maxHp = type === "jeep" ? JEEP_HP : type === "truck" ? 80 : 120;
+    this.maxHp = type === "jeep" ? JEEP_HP : type === "truck" ? TRUCK_HP : 120;
     this.hp = this.maxHp;
 
     const texKey = type === "jeep" ? "jeep_military" : type === "truck" ? "truck_military" : "tank_military";
+    const sizeW = type === "truck" ? 70 : type === "tank" ? 65 : 55;
+    const sizeH = type === "truck" ? 45 : type === "tank" ? 40 : 35;
     if (scene.textures.exists(texKey)) {
       this.sprite = scene.add
         .image(x, y, texKey)
-        .setDisplaySize(60, 40)
+        .setDisplaySize(sizeW + 5, sizeH + 5)
         .setDepth(10)
         .setRotation(rotation);
     } else {
       const color = type === "jeep" ? 0x4a7a3a : type === "truck" ? 0x6a6a4a : 0x5a5a5a;
       this.sprite = scene.add
-        .rectangle(x, y, 55, 35, color)
+        .rectangle(x, y, sizeW, sizeH, color)
         .setDepth(10)
         .setRotation(rotation);
     }
