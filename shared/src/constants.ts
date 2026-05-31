@@ -27,3 +27,5 @@ export const AI_SHOOT_RANGE = 350;
 export const AI_SHOOT_AIM_VARIATION = 0.08;
 export const AI_FIRE_REACTION_DELAY_MS = 300;
 export const AI_CHASE_DESIRED_DISTANCE = 200;
+export const CHECKPOINT_CAPTURE_TIME_MS = 5000;
+export const CHECKPOINT_RADIUS = 100;

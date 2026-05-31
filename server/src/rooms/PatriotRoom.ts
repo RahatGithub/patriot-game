@@ -14,6 +14,7 @@ import {
   PLAYER_HITBOX_RADIUS,
   DOWNED_TIMEOUT_MS,
   AI_RADIUS,
+  CHECKPOINT_CAPTURE_TIME_MS,
 } from "@patriot/shared";
 import type { InputCommand, WeaponId, DamageSource } from "@patriot/shared";
 import { RoomStateSchema } from "./schema/RoomStateSchema.js";
@@ -23,6 +24,7 @@ import { generateRoomCode } from "../utils/roomCode.js";
 import { registerRoom, unregisterRoom } from "../utils/roomRegistry.js";
 import { checkWallCollision, clampToMap } from "../systems/collision.js";
 import { AIManager } from "../ai/AIManager.js";
+import { CheckpointSchema } from "./schema/CheckpointSchema.js";
 
 export class PatriotRoom extends Room<RoomStateSchema> {
   maxClients = MAX_PLAYERS_PER_ROOM;
@@ -133,6 +135,7 @@ export class PatriotRoom extends Room<RoomStateSchema> {
       this.state.matchStarted = true;
       this.broadcast(ServerMessage.MATCH_STARTED);
       this.aiManager.spawnInitial();
+      this.initializeCheckpoints();
       console.log(`[Room ${this.state.code}] Match started`);
     });
 
@@ -231,6 +234,85 @@ export class PatriotRoom extends Room<RoomStateSchema> {
 
     // AI update
     this.aiManager.update(deltaTime);
+
+    // Checkpoint capture logic
+    this.state.checkpoints.forEach((cp) => {
+      if (cp.captured) return;
+
+      const humansInZone: PlayerSchema[] = [];
+      this.state.players.forEach((p) => {
+        if (p.isDead) return;
+        const dx = p.x - cp.x;
+        const dy = p.y - cp.y;
+        if (dx * dx + dy * dy <= cp.radius * cp.radius) {
+          humansInZone.push(p);
+        }
+      });
+
+      let mafiaInZone = 0;
+      this.state.ai.forEach((ai) => {
+        if (ai.isDead) return;
+        const dx = ai.x - cp.x;
+        const dy = ai.y - cp.y;
+        if (dx * dx + dy * dy <= cp.radius * cp.radius) mafiaInZone++;
+      });
+
+      cp.capturingPlayerIds = humansInZone.map((p) => p.id).join(",");
+
+      if (humansInZone.length > 0 && mafiaInZone === 0) {
+        cp.captureProgress += deltaTime / CHECKPOINT_CAPTURE_TIME_MS;
+        if (cp.captureProgress >= 1.0) {
+          cp.captureProgress = 1.0;
+          cp.captured = true;
+          cp.capturedAt = Date.now();
+          this.state.capturedCount++;
+          this.onCheckpointCaptured(cp);
+        }
+      } else if (humansInZone.length === 0) {
+        // No humans — decay progress
+        cp.captureProgress = Math.max(0, cp.captureProgress - deltaTime / 2000);
+      }
+      // If mafia in zone with humans: progress paused (no increment, no decay)
+    });
+  }
+
+  private initializeCheckpoints() {
+    const count = this.state.checkpointCount;
+    const activeCps = PATRIOT_MAP.checkpoints.slice(0, count);
+
+    activeCps.forEach((cpDef, i) => {
+      const cp = new CheckpointSchema();
+      cp.id = cpDef.id;
+      cp.order = i + 1;
+      cp.x = cpDef.position.x;
+      cp.y = cpDef.position.y;
+      cp.radius = cpDef.radius;
+      this.state.checkpoints.set(cp.id, cp);
+    });
+
+    console.log(`[Room ${this.state.code}] Initialized ${count} checkpoints`);
+  }
+
+  private onCheckpointCaptured(cp: CheckpointSchema) {
+    this.broadcast("checkpointCaptured", {
+      checkpointId: cp.id,
+      order: cp.order,
+      capturedAt: cp.capturedAt,
+    });
+
+    // Respawn fully-dead players at this checkpoint
+    this.state.players.forEach((p) => {
+      if (p.isDead) {
+        p.isDead = false;
+        p.isDowned = false;
+        p.hp = 100;
+        p.x = cp.x + (Math.random() - 0.5) * 50;
+        p.y = cp.y + (Math.random() - 0.5) * 50;
+        p.currentWeapon = "pistol";
+      }
+    });
+
+    console.log(`[Room ${this.state.code}] Checkpoint ${cp.order} captured`);
   }
 
   private applyDamageToAI(
@@ -361,13 +443,27 @@ export class PatriotRoom extends Room<RoomStateSchema> {
 
   onJoin(client: Client, options: any, auth: { name: string }) {
     const spawn = PATRIOT_MAP.playerSpawn;
+    let spawnX = spawn.x + Math.random() * spawn.width;
+    let spawnY = spawn.y + Math.random() * spawn.height;
+
+    // Mid-match join: spawn at latest captured checkpoint
+    if (this.state.capturedCount > 0) {
+      const captured = Array.from(this.state.checkpoints.values())
+        .filter((c) => c.captured)
+        .sort((a, b) => b.order - a.order);
+      if (captured.length > 0) {
+        spawnX = captured[0].x + (Math.random() - 0.5) * 50;
+        spawnY = captured[0].y + (Math.random() - 0.5) * 50;
+      }
+    }
+
     const player = new PlayerSchema();
     player.id = client.sessionId;
     player.name = auth.name;
     player.isCreator = this.state.players.size === 0;
     player.joinedAt = Date.now();
-    player.x = spawn.x + Math.random() * spawn.width;
-    player.y = spawn.y + Math.random() * spawn.height;
+    player.x = spawnX;
+    player.y = spawnY;
     player.hp = 100;
     player.rank = "soldier";
 

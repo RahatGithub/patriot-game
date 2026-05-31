@@ -1,9 +1,16 @@
 import Phaser from "phaser";
+import { PATRIOT_MAP } from "@patriot/shared";
+
+const MINIMAP_W = 160;
+const MINIMAP_H = 120; // 4:3 ratio matching 4000x3000 map
+const MINIMAP_X = 15;
+const MINIMAP_Y = 15;
 
 export class HUDScene extends Phaser.Scene {
   private hpText!: Phaser.GameObjects.Text;
   private weaponText!: Phaser.GameObjects.Text;
   private rankText!: Phaser.GameObjects.Text;
+  private minimapGfx!: Phaser.GameObjects.Graphics;
 
   constructor() {
     super("HUDScene");
@@ -15,9 +22,18 @@ export class HUDScene extends Phaser.Scene {
     const W = 1920;
     const H = 1080;
 
-    // --- Top-left: mini-map placeholder ---
-    this.add.rectangle(90, 90, 150, 150, 0x000000, 0.5).setStrokeStyle(1, 0x555555);
-    this.add.text(90, 90, "MAP", { fontSize: "14px", color: "#666" }).setOrigin(0.5);
+    // --- Top-left: mini-map ---
+    this.add
+      .rectangle(
+        MINIMAP_X + MINIMAP_W / 2,
+        MINIMAP_Y + MINIMAP_H / 2,
+        MINIMAP_W,
+        MINIMAP_H,
+        0x000000,
+        0.6
+      )
+      .setStrokeStyle(1, 0x555555);
+    this.minimapGfx = this.add.graphics();
 
     // --- Top-center: timer ---
     this.add
@@ -108,8 +124,36 @@ export class HUDScene extends Phaser.Scene {
             const ammoStr = me.currentWeapon === "pistol" ? "30/\u221e" : "\u221e";
             this.weaponText.setText(`${wepName}  ${ammoStr}`);
           }
+
+          // Mini-map update
+          this.updateMinimap(room, me);
         }
       },
     });
+  }
+
+  private updateMinimap(room: any, localPlayer: any) {
+    const gfx = this.minimapGfx;
+    gfx.clear();
+
+    const scaleX = MINIMAP_W / PATRIOT_MAP.width;
+    const scaleY = MINIMAP_H / PATRIOT_MAP.height;
+
+    // Draw checkpoint dots
+    room.state.checkpoints?.forEach((cp: any) => {
+      const dotX = MINIMAP_X + cp.x * scaleX;
+      const dotY = MINIMAP_Y + cp.y * scaleY;
+      const color = cp.captured ? 0x228b22 : 0xcc2222;
+      gfx.fillStyle(color, 1);
+      gfx.fillCircle(dotX, dotY, 4);
+    });
+
+    // Draw local player dot
+    if (localPlayer && !localPlayer.isDead) {
+      const px = MINIMAP_X + localPlayer.x * scaleX;
+      const py = MINIMAP_Y + localPlayer.y * scaleY;
+      gfx.fillStyle(0x4488ff, 1);
+      gfx.fillCircle(px, py, 3);
+    }
   }
 }

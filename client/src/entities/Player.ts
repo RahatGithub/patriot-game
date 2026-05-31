@@ -152,6 +152,19 @@ export class Player {
     }
   }
 
+  /** Revive from dead/downed state (respawn at checkpoint) */
+  revive() {
+    this.isDowned = false;
+    this.hp = 100;
+    this.sprite.setAlpha(1);
+    (this.sprite as any).clearTint?.();
+    this.nameLabel.setVisible(true);
+    this.nameLabel.setColor(this.isLocal ? "#fff" : "#ccc");
+    this.hpBarBg.setVisible(true);
+    this.hpBarFg.setVisible(true);
+    this.setHp(100);
+  }
+
   /** Brief red tint flash on hit */
   flashHit() {
     (this.sprite as any).setTint?.(0xff0000);

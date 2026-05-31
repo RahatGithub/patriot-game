@@ -18,6 +18,7 @@ import type { NetworkManager } from "../network/NetworkManager.js";
 import { checkWallCollisionClient } from "../systems/collisionClient.js";
 import { BloodSplatter } from "../effects/BloodSplatter.js";
 import { AIEntity } from "../entities/AIEntity.js";
+import { CheckpointFlag } from "../entities/CheckpointFlag.js";
 
 const FREE_CAM_SPEED = 600;
 
@@ -41,6 +42,20 @@ export class GameScene extends Phaser.Scene {
   private lastFireTime = 0;
   private sessionId = "";
   private stateSetup = false;
+
+  // Checkpoint rendering
+  private checkpointZoneGfx: Phaser.GameObjects.Graphics | null = null;
+  private checkpointFlags = new Map<string, CheckpointFlag>();
+  private checkpointLabels = new Map<string, Phaser.GameObjects.Text>();
+  private capturedSet = new Set<string>();
+
+  // Capture progress UI (screen-space, added to HUD camera)
+  private captureBarBg: Phaser.GameObjects.Rectangle | null = null;
+  private captureBarFg: Phaser.GameObjects.Rectangle | null = null;
+  private captureBarLabel: Phaser.GameObjects.Text | null = null;
+  private captureNotification: Phaser.GameObjects.Text | null = null;
+  private respawnNotification: Phaser.GameObjects.Text | null = null;
+  private localPlayerWasDead = false;
 
   constructor() {
     super("GameScene");
@@ -98,28 +113,8 @@ export class GameScene extends Phaser.Scene {
       this.wallGroup.add(rect);
     }
 
-    // --- Render checkpoints ---
-    const cpGfx = this.add.graphics();
-    for (const cp of map.checkpoints) {
-      cpGfx.fillStyle(0xffff00, 0.15);
-      cpGfx.fillCircle(cp.position.x, cp.position.y, cp.radius);
-      cpGfx.lineStyle(2, 0xffff00, 0.4);
-      cpGfx.strokeCircle(cp.position.x, cp.position.y, cp.radius);
-      this.add
-        .text(cp.position.x, cp.position.y - cp.radius - 16, `Checkpoint ${cp.order}`, {
-          fontSize: "14px",
-          color: "#ffff88",
-        })
-        .setOrigin(0.5);
-      cpGfx.fillStyle(0xcc2222, 0.8);
-      cpGfx.fillRect(cp.position.x - 8, cp.position.y - 20, 16, 24);
-      cpGfx.fillStyle(0xcc2222, 1);
-      cpGfx.fillTriangle(
-        cp.position.x - 8, cp.position.y - 20,
-        cp.position.x - 8, cp.position.y - 8,
-        cp.position.x + 8, cp.position.y - 14
-      );
-    }
+    // --- Checkpoint zone graphics (redrawn dynamically from server state) ---
+    this.checkpointZoneGfx = this.add.graphics().setDepth(1);
 
     // --- Input manager ---
     this.inputManager = new InputManager();
@@ -197,6 +192,52 @@ export class GameScene extends Phaser.Scene {
     // --- Multiplayer state sync ---
     this.setupNetworking();
 
+    // --- Capture progress bar (fixed to camera, screen-space) ---
+    this.captureBarBg = this.add
+      .rectangle(0, 0, 300, 24, 0x000000, 0.7)
+      .setScrollFactor(0)
+      .setDepth(100)
+      .setVisible(false);
+    this.captureBarFg = this.add
+      .rectangle(0, 0, 0, 20, 0x44bb44, 1)
+      .setScrollFactor(0)
+      .setDepth(101)
+      .setVisible(false);
+    this.captureBarLabel = this.add
+      .text(0, 0, "", { fontSize: "14px", color: "#fff", stroke: "#000", strokeThickness: 2 })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(102)
+      .setVisible(false);
+
+    // Capture celebration text
+    this.captureNotification = this.add
+      .text(0, 0, "CHECKPOINT CAPTURED!", {
+        fontSize: "36px",
+        color: "#00ff00",
+        fontStyle: "bold",
+        stroke: "#000",
+        strokeThickness: 4,
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(200)
+      .setVisible(false);
+
+    // Respawn notification
+    this.respawnNotification = this.add
+      .text(0, 0, "", {
+        fontSize: "22px",
+        color: "#44ddff",
+        fontStyle: "bold",
+        stroke: "#000",
+        strokeThickness: 3,
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(200)
+      .setVisible(false);
+
     // Cleanup
     this.events.on("shutdown", () => {
       this.inputManager?.destroy();
@@ -207,6 +248,11 @@ export class GameScene extends Phaser.Scene {
       this.bullets.clear();
       this.aiEntities.forEach((a) => a.destroy());
       this.aiEntities.clear();
+      this.checkpointFlags.forEach((f) => f.destroy());
+      this.checkpointFlags.clear();
+      this.checkpointLabels.forEach((l) => l.destroy());
+      this.checkpointLabels.clear();
+      this.capturedSet.clear();
       this.debugOverlay?.destroy();
       this.debugOverlay = null;
     });
@@ -255,13 +301,30 @@ export class GameScene extends Phaser.Scene {
         if (sid === this.sessionId) {
           this.reconcileLocal(p);
           if (this.localPlayer) {
+            // Detect respawn: was dead, now alive
+            if (!p.isDead && !p.isDowned && (this.localPlayer.isDowned || this.localPlayerWasDead)) {
+              this.localPlayer.revive();
+              this.localPlayer.setPosition(p.x, p.y);
+              if (!this.freeCam) {
+                this.cameras.main.startFollow(this.localPlayer.sprite, true, 0.1, 0.1);
+              }
+              this.showRespawnNotification();
+              this.localPlayerWasDead = false;
+            }
             this.localPlayer.setHp(p.hp);
             if (p.isDowned && !this.localPlayer.isDowned) this.localPlayer.setDowned(true);
-            if (p.isDead) this.localPlayer.setDead(true);
+            if (p.isDead) {
+              this.localPlayer.setDead(true);
+              this.localPlayerWasDead = true;
+            }
           }
         } else {
           const remote = this.remotePlayers.get(sid);
           if (remote) {
+            // Detect respawn for remote players
+            if (!p.isDead && !p.isDowned && remote.isDowned) {
+              remote.revive();
+            }
             remote.pushSnapshot(p.x, p.y, p.aimAngle);
             remote.setHp(p.hp);
             if (p.isDowned && !remote.isDowned) remote.setDowned(true);
@@ -394,6 +457,47 @@ export class GameScene extends Phaser.Scene {
         ent.destroy();
         this.aiEntities.delete(id);
       }
+    });
+
+    // --- Checkpoint sync ---
+    room.state.checkpoints.onAdd((cp: any, id: string) => {
+      if (!this.checkpointFlags.has(id)) {
+        const flag = new CheckpointFlag(this, cp.x, cp.y);
+        this.checkpointFlags.set(id, flag);
+        const label = this.add
+          .text(cp.x, cp.y - cp.radius - 16, `CP ${cp.order}`, {
+            fontSize: "14px",
+            color: "#ffff88",
+            stroke: "#000",
+            strokeThickness: 2,
+          })
+          .setOrigin(0.5)
+          .setDepth(9);
+        this.checkpointLabels.set(id, label);
+        if (cp.captured) {
+          flag.capture();
+          this.capturedSet.add(id);
+        }
+      }
+    });
+
+    room.state.checkpoints.onRemove((_cp: any, id: string) => {
+      this.checkpointFlags.get(id)?.destroy();
+      this.checkpointFlags.delete(id);
+      this.checkpointLabels.get(id)?.destroy();
+      this.checkpointLabels.delete(id);
+    });
+
+    // Checkpoint captured event
+    room.onMessage("checkpointCaptured", (data: any) => {
+      const { checkpointId, order } = data;
+
+      // Trigger flag color transition
+      this.checkpointFlags.get(checkpointId)?.capture();
+      this.capturedSet.add(checkpointId);
+
+      // Celebration overlay
+      this.showCaptureNotification(order);
     });
   }
 
@@ -549,6 +653,12 @@ export class GameScene extends Phaser.Scene {
       ai.interpolate();
       ai.update();
     });
+
+    // Update checkpoint flags (wave animation)
+    this.checkpointFlags.forEach((flag) => flag.update(delta));
+
+    // Update checkpoint zone visuals + capture progress bar
+    this.updateCheckpoints();
   }
 
   private toggleGrid() {
@@ -587,5 +697,155 @@ export class GameScene extends Phaser.Scene {
       }
     }
     this.gridVisible = true;
+  }
+
+  private updateCheckpoints() {
+    const room = this.networkManager?.getRoom();
+    if (!room) return;
+
+    const gfx = this.checkpointZoneGfx;
+    if (!gfx) return;
+
+    gfx.clear();
+
+    const cam = this.cameras.main;
+    const screenCenterX = cam.width / 2;
+    const barY = 80;
+
+    let localInCpId: string | null = null;
+    let localCpOrder = 0;
+    let localCpProgress = 0;
+    let localCpMafiaPresent = false;
+
+    (room.state as any).checkpoints?.forEach((cp: any, id: string) => {
+      // Draw zone circle
+      const fillColor = cp.captured ? 0x228b22 : 0xffff00;
+      const fillAlpha = cp.captured ? 0.15 : 0.15;
+      const strokeColor = cp.captured ? 0x228b22 : 0xffff00;
+
+      gfx.fillStyle(fillColor, fillAlpha);
+      gfx.fillCircle(cp.x, cp.y, cp.radius);
+      gfx.lineStyle(2, strokeColor, 0.4);
+      gfx.strokeCircle(cp.x, cp.y, cp.radius);
+
+      // Check if local player is inside this checkpoint
+      if (this.localPlayer && !cp.captured) {
+        const dx = this.localPlayer.sprite.x - cp.x;
+        const dy = this.localPlayer.sprite.y - cp.y;
+        if (dx * dx + dy * dy <= cp.radius * cp.radius) {
+          localInCpId = id;
+          localCpOrder = cp.order;
+          localCpProgress = cp.captureProgress;
+          // Check if mafia present by examining capturingPlayerIds vs progress behavior
+          const ids = cp.capturingPlayerIds as string;
+          const hasHumans = ids.length > 0;
+          // If progress is not advancing and humans are present, mafia must be in zone
+          localCpMafiaPresent = hasHumans && cp.captureProgress === this._lastCpProgress.get(id);
+        }
+      }
+
+      // Track progress for mafia detection heuristic
+      this._lastCpProgress.set(id, cp.captureProgress);
+    });
+
+    // Update capture progress bar
+    if (localInCpId && this.captureBarBg && this.captureBarFg && this.captureBarLabel) {
+      this.captureBarBg.setPosition(screenCenterX, barY).setVisible(true);
+      const barWidth = 280 * localCpProgress;
+      this.captureBarFg
+        .setPosition(screenCenterX - 140 + barWidth / 2, barY)
+        .setSize(barWidth, 20)
+        .setVisible(true);
+
+      if (localCpMafiaPresent && localCpProgress > 0 && localCpProgress < 1) {
+        this.captureBarLabel.setText(`\u26A0 Enemies in zone — clear them!`);
+        this.captureBarLabel.setColor("#ff4444");
+        this.captureBarFg.fillColor = 0xcc2222;
+      } else {
+        this.captureBarLabel.setText(`Capturing Checkpoint ${localCpOrder}...`);
+        this.captureBarLabel.setColor("#ffffff");
+        this.captureBarFg.fillColor = 0x44bb44;
+      }
+      this.captureBarLabel.setPosition(screenCenterX, barY).setVisible(true);
+    } else {
+      this.captureBarBg?.setVisible(false);
+      this.captureBarFg?.setVisible(false);
+
+      // If not in any checkpoint but progress was decaying, show message briefly
+      if (this.captureBarLabel) {
+        // Check if any checkpoint has decaying progress
+        let decaying = false;
+        (room.state as any).checkpoints?.forEach((cp: any) => {
+          if (!cp.captured && cp.captureProgress > 0 && cp.captureProgress < 1) {
+            decaying = true;
+          }
+        });
+        if (decaying) {
+          this.captureBarBg?.setPosition(screenCenterX, barY).setVisible(true);
+          this.captureBarLabel.setText("Capture lost \u2014 return to zone");
+          this.captureBarLabel.setColor("#888888");
+          this.captureBarLabel.setPosition(screenCenterX, barY).setVisible(true);
+          this.captureBarFg?.setVisible(false);
+        } else {
+          this.captureBarLabel.setVisible(false);
+        }
+      }
+    }
+  }
+
+  private _lastCpProgress = new Map<string, number>();
+
+  private showCaptureNotification(order: number) {
+    if (!this.captureNotification) return;
+    const cam = this.cameras.main;
+    this.captureNotification
+      .setText(`CHECKPOINT ${order} CAPTURED!`)
+      .setPosition(cam.width / 2, cam.height / 2 - 60)
+      .setAlpha(1)
+      .setVisible(true);
+
+    // Brief screen flash
+    this.cameras.main.flash(400, 100, 255, 100);
+
+    // Fade out after 2s
+    this.tweens.add({
+      targets: this.captureNotification,
+      alpha: 0,
+      delay: 1500,
+      duration: 500,
+      onComplete: () => this.captureNotification?.setVisible(false),
+    });
+  }
+
+  private showRespawnNotification() {
+    if (!this.respawnNotification) return;
+    const cam = this.cameras.main;
+
+    // Find which checkpoint we respawned at (latest captured)
+    const room = this.networkManager?.getRoom();
+    let cpOrder = 0;
+    if (room) {
+      let latestCaptured: any = null;
+      (room.state as any).checkpoints?.forEach((cp: any) => {
+        if (cp.captured && (!latestCaptured || cp.capturedAt > latestCaptured.capturedAt)) {
+          latestCaptured = cp;
+        }
+      });
+      if (latestCaptured) cpOrder = latestCaptured.order;
+    }
+
+    this.respawnNotification
+      .setText(cpOrder > 0 ? `Respawned at Checkpoint ${cpOrder}` : "Respawned!")
+      .setPosition(cam.width / 2, 130)
+      .setAlpha(1)
+      .setVisible(true);
+
+    this.tweens.add({
+      targets: this.respawnNotification,
+      alpha: 0,
+      delay: 1500,
+      duration: 500,
+      onComplete: () => this.respawnNotification?.setVisible(false),
+    });
   }
 }
