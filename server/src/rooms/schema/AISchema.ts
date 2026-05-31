@@ -1,4 +1,5 @@
 import { Schema, type } from "@colyseus/schema";
+import { AI_VISION_RANGE, AI_VISION_ARC } from "@patriot/shared";
 
 export class AISchema extends Schema {
   @type("string") id: string;
@@ -14,4 +15,6 @@ export class AISchema extends Schema {
   @type("number") currentWaypointIdx: number = 0;
   @type("number") patrolDirection: number = 1;
   @type("number") deathTime: number = 0;
+  @type("number") visionRange: number = AI_VISION_RANGE;
+  @type("number") visionArc: number = AI_VISION_ARC;
 }

@@ -15,3 +15,7 @@ export const AI_WALK_SPEED = 100;
 export const AI_RUN_SPEED = 250;
 export const AI_RADIUS = 22;
 export const AI_INITIAL_HP = 50;
+export const AI_VISION_RANGE = 250;
+export const AI_VISION_ARC = Math.PI / 2;
+export const AI_VISION_ALERT_RANGE_MULT = 1.3;
+export const AI_VISION_TICK_INTERVAL = 100;

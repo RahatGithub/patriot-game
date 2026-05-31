@@ -1,5 +1,6 @@
 import Phaser from "phaser";
-import { AI_RADIUS, INTERPOLATION_DELAY_MS } from "@patriot/shared";
+import { AI_RADIUS, INTERPOLATION_DELAY_MS, AI_VISION_RANGE, AI_VISION_ARC } from "@patriot/shared";
+import { VisionCone } from "./VisionCone.js";
 
 const HP_BAR_W = 40;
 const HP_BAR_H = 5;
@@ -21,6 +22,9 @@ export class AIEntity {
   private usingPlaceholder: boolean;
   hp = 50;
   isDead = false;
+  behaviorState = "patrol";
+  private visionCone: VisionCone;
+  private lastAimAngle = 0;
 
   constructor(scene: Phaser.Scene, id: string, x: number, y: number, weapon: string) {
     this.scene = scene;
@@ -52,12 +56,16 @@ export class AIEntity {
     body.setImmovable(true);
     body.moves = false;
 
+    // Vision cone
+    this.visionCone = new VisionCone(scene);
+
     // Red HP bar (enemy)
     this.hpBarBg = scene.add.rectangle(x, y - 30, HP_BAR_W, HP_BAR_H, 0x333333).setOrigin(0.5).setDepth(19);
     this.hpBarFg = scene.add.rectangle(x, y - 30, HP_BAR_W, HP_BAR_H, 0xcc2222).setOrigin(0.5).setDepth(19);
   }
 
   setAimAngle(angle: number) {
+    this.lastAimAngle = angle;
     this.sprite.rotation = angle + Math.PI / 2;
   }
 
@@ -74,6 +82,11 @@ export class AIEntity {
     this.sprite.rotation = Math.PI / 2;
     this.hpBarBg.setVisible(false);
     this.hpBarFg.setVisible(false);
+    this.visionCone.setVisible(false);
+  }
+
+  setBehaviorState(state: string) {
+    this.behaviorState = state;
   }
 
   pushSnapshot(x: number, y: number, aimAngle: number) {
@@ -118,17 +131,29 @@ export class AIEntity {
   }
 
   update() {
-    // Follow sprite position for HP bars
     this.hpBarBg.setPosition(this.sprite.x, this.sprite.y - 30);
     this.hpBarFg.setPosition(
       this.sprite.x - (HP_BAR_W - this.hpBarFg.width) / 2,
       this.sprite.y - 30
     );
+
+    // Update vision cone
+    if (!this.isDead) {
+      this.visionCone.update(
+        this.sprite.x,
+        this.sprite.y,
+        this.lastAimAngle,
+        AI_VISION_RANGE,
+        AI_VISION_ARC,
+        this.behaviorState
+      );
+    }
   }
 
   destroy() {
     this.sprite.destroy();
     this.hpBarBg.destroy();
     this.hpBarFg.destroy();
+    this.visionCone.destroy();
   }
 }

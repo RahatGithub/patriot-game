@@ -301,6 +301,7 @@ export class GameScene extends Phaser.Scene {
         if (ent) {
           ent.pushSnapshot(ai.x, ai.y, ai.aimAngle);
           ent.setHp(ai.hp);
+          ent.setBehaviorState(ai.behaviorState);
           if (ai.isDead && !ent.isDead) ent.setDead();
         }
       });
