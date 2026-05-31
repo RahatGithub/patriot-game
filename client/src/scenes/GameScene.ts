@@ -23,7 +23,8 @@ import { Crate } from "../entities/Crate.js";
 import { Pickup } from "../entities/Pickup.js";
 import { getStateCallbacks } from "colyseus.js";
 import { PickupPromptUI } from "../ui/PickupPromptUI.js";
-import { PICKUP_INTERACT_RANGE } from "@patriot/shared";
+import { PICKUP_INTERACT_RANGE, canUseWeapon } from "@patriot/shared";
+import type { RankId, WeaponId } from "@patriot/shared";
 
 const FREE_CAM_SPEED = 600;
 
@@ -657,6 +658,11 @@ export class GameScene extends Phaser.Scene {
       }
     });
 
+    // Pickup blocked by rank
+    room.onMessage("pickupBlocked", (data: any) => {
+      this.showWeaponNotification(`Requires ${data.requiredRank}`);
+    });
+
     // Player promoted event
     room.onMessage("playerPromoted", (data: any) => {
       const { playerId, newRankName } = data;
@@ -1154,19 +1160,28 @@ export class GameScene extends Phaser.Scene {
     }
 
     const cam = this.cameras.main;
+    const room = this.networkManager?.getRoom();
+    if (!room) { this.pickupPrompt.hide(); return; }
+
+    const localState = (room.state as any).players?.get(this.sessionId);
+    const playerRank = (localState?.rank || "soldier") as RankId;
+
     let closestPk: Pickup | null = null;
     let closestDist = PICKUP_INTERACT_RANGE;
     let closestType = "";
     let closestId = "";
 
-    // Check server state pickups for type (client entities may not have it synced)
-    const room = this.networkManager?.getRoom();
-    if (!room) { this.pickupPrompt.hide(); return; }
-
     (room.state as any).pickups?.forEach((pk: any, id: string) => {
       if (pk.type === "cure") return; // Cure is auto-pickup, no prompt
       const ent = this.pickupEntities.get(id);
       if (!ent) return;
+
+      // Update lock overlay for all weapon pickups
+      if (pk.type.startsWith("weapon_")) {
+        const wepId = pk.type.replace("weapon_", "") as WeaponId;
+        ent.setLocked(!canUseWeapon(playerRank, wepId));
+      }
+
       const dx = this.localPlayer!.sprite.x - pk.x;
       const dy = this.localPlayer!.sprite.y - pk.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
@@ -1181,7 +1196,7 @@ export class GameScene extends Phaser.Scene {
     if (closestPk && closestType.startsWith("weapon_")) {
       const sx = (closestPk.x - cam.scrollX) * cam.zoom;
       const sy = (closestPk.y - cam.scrollY) * cam.zoom;
-      this.pickupPrompt.show(closestId, closestType, sx, sy);
+      this.pickupPrompt.show(closestId, closestType, sx, sy, playerRank);
     } else {
       this.pickupPrompt.hide();
     }

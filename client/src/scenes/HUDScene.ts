@@ -1,6 +1,6 @@
 import Phaser from "phaser";
-import { PATRIOT_MAP, getRankForKills, getNextRank, RANKS } from "@patriot/shared";
-import type { RankId } from "@patriot/shared";
+import { PATRIOT_MAP, getRankForKills, getNextRank, RANKS, WEAPONS } from "@patriot/shared";
+import type { RankId, WeaponId } from "@patriot/shared";
 
 const MINIMAP_W = 160;
 const MINIMAP_H = 120; // 4:3 ratio matching 4000x3000 map
@@ -146,7 +146,10 @@ export class HUDScene extends Phaser.Scene {
             this.rankText.setText(`${rankDef.name.toUpperCase()} ${stars}`);
             const next = getNextRank(rankId);
             if (next) {
-              this.killsText.setText(`${kills} / ${next.killThreshold} kills to ${next.name}`);
+              // Find what weapon unlocks at next rank
+              const unlocks = Object.values(WEAPONS).filter((w) => w.rankRequired === RANKS.findIndex((r) => r.id === next.id) + 1);
+              const unlockStr = unlocks.length > 0 ? ` — unlocks ${unlocks[0].name}` : "";
+              this.killsText.setText(`${kills} / ${next.killThreshold} kills to ${next.name}${unlockStr}`);
             } else {
               this.killsText.setText(`MAX RANK ${stars}`);
             }

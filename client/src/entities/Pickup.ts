@@ -30,8 +30,10 @@ export class Pickup {
   private scene: Phaser.Scene;
   private gfx: Phaser.GameObjects.Graphics;
   private label: Phaser.GameObjects.Text;
+  private lockLabel: Phaser.GameObjects.Text | null = null;
   private phase: number;
   private baseY: number;
+  locked = false;
 
   constructor(scene: Phaser.Scene, id: string, x: number, y: number, type: string) {
     this.scene = scene;
@@ -81,18 +83,39 @@ export class Pickup {
     }
   }
 
+  setLocked(locked: boolean) {
+    if (this.locked === locked) return;
+    this.locked = locked;
+    if (locked && !this.lockLabel) {
+      this.lockLabel = this.scene.add
+        .text(this.x + ICON_RADIUS - 2, this.y - ICON_RADIUS + 2, "\uD83D\uDD12", {
+          fontSize: "10px",
+        })
+        .setOrigin(0.5)
+        .setDepth(9);
+    }
+    if (!locked && this.lockLabel) {
+      this.lockLabel.destroy();
+      this.lockLabel = null;
+    }
+  }
+
   update(dt: number) {
     this.phase += dt * BOB_FREQ;
     const bobOffset = Math.sin(this.phase) * BOB_AMP;
     this.y = this.baseY + bobOffset;
 
+    const baseColor = getPickupColor(this.type);
+    const color = this.locked ? 0x666666 : baseColor;
     const glowAlpha = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(this.phase * (GLOW_FREQ / BOB_FREQ)));
-    this.drawIcon(getPickupColor(this.type), glowAlpha);
+    this.drawIcon(color, this.locked ? 0 : glowAlpha);
     this.label.setPosition(this.x, this.y);
+    this.lockLabel?.setPosition(this.x + ICON_RADIUS - 2, this.y - ICON_RADIUS + 2);
   }
 
   destroy() {
     this.gfx.destroy();
     this.label.destroy();
+    this.lockLabel?.destroy();
   }
 }

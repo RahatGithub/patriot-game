@@ -1,5 +1,5 @@
-import { WEAPONS } from "@patriot/shared";
-import type { WeaponId } from "@patriot/shared";
+import { WEAPONS, canUseWeapon, getRankRequiredForWeapon } from "@patriot/shared";
+import type { WeaponId, RankId } from "@patriot/shared";
 
 const WEAPON_COLORS: Record<string, string> = {
   weapon_pistol: "#FFD700",
@@ -17,9 +17,13 @@ function getWeaponName(type: string): string {
 export class PickupPromptUI {
   private el: HTMLElement | null = null;
   private currentPickupId = "";
+  private currentLocked = false;
 
-  show(pickupId: string, type: string, screenX: number, screenY: number) {
-    if (this.currentPickupId === pickupId && this.el) {
+  show(pickupId: string, type: string, screenX: number, screenY: number, playerRank: RankId) {
+    const weaponId = type.replace("weapon_", "") as WeaponId;
+    const locked = !canUseWeapon(playerRank, weaponId);
+
+    if (this.currentPickupId === pickupId && this.el && this.currentLocked === locked) {
       // Just reposition
       this.el.style.left = `${screenX}px`;
       this.el.style.top = `${screenY - 80}px`;
@@ -28,9 +32,10 @@ export class PickupPromptUI {
 
     this.hide();
     this.currentPickupId = pickupId;
+    this.currentLocked = locked;
 
     const name = getWeaponName(type);
-    const borderColor = WEAPON_COLORS[type] || "#888";
+    const borderColor = locked ? "#666" : (WEAPON_COLORS[type] || "#888");
 
     const el = document.createElement("div");
     el.id = "pickup-prompt";
@@ -41,13 +46,25 @@ export class PickupPromptUI {
       padding:8px 16px; color:#fff; font-family:monospace; font-size:13px;
       z-index:1000; text-align:center; pointer-events:auto; white-space:nowrap;
     `;
-    el.innerHTML = `
-      <div style="font-weight:bold; margin-bottom:4px">Pick up ${name}?</div>
-      <div style="font-size:11px; color:#aaa">
-        <span style="color:#88ff88">[E]</span> Yes &nbsp;&nbsp;
-        <span style="color:#ff8888">[N]</span> No
-      </div>
-    `;
+
+    if (locked) {
+      const requiredRank = getRankRequiredForWeapon(weaponId);
+      el.innerHTML = `
+        <div style="font-weight:bold; margin-bottom:4px; color:#aa6666">\uD83D\uDD12 ${name}</div>
+        <div style="font-size:11px; color:#aa6666">
+          Requires: ${requiredRank?.name || "Unknown"}
+        </div>
+        <div style="font-size:10px; color:#666; margin-top:2px">(Promote to unlock)</div>
+      `;
+    } else {
+      el.innerHTML = `
+        <div style="font-weight:bold; margin-bottom:4px">Pick up ${name}?</div>
+        <div style="font-size:11px; color:#aaa">
+          <span style="color:#88ff88">[E]</span> Yes &nbsp;&nbsp;
+          <span style="color:#ff8888">[N]</span> No
+        </div>
+      `;
+    }
 
     document.body.appendChild(el);
     this.el = el;
@@ -58,6 +75,7 @@ export class PickupPromptUI {
       this.el.remove();
       this.el = null;
       this.currentPickupId = "";
+      this.currentLocked = false;
     }
   }
 

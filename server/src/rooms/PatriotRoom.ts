@@ -22,7 +22,10 @@ import {
   PLAYER_MAX_HP,
   MAX_GRENADES,
   getRankForKills,
+  canUseWeapon,
+  getRankRequiredForWeapon,
 } from "@patriot/shared";
+import type { RankId } from "@patriot/shared";
 import type { InputCommand, WeaponId, DamageSource, MatchResult } from "@patriot/shared";
 import { RoomStateSchema } from "./schema/RoomStateSchema.js";
 import { PlayerSchema } from "./schema/PlayerSchema.js";
@@ -135,7 +138,7 @@ export class PatriotRoom extends Room<RoomStateSchema> {
         if (d < nearestDist) { nearest = pk; nearestDist = d; nearestId = id; }
       });
       if (nearest) {
-        this.attemptPickup(player, nearest, nearestId);
+        this.attemptPickup(player, nearest, nearestId, client);
       }
     });
 
@@ -422,7 +425,7 @@ export class PatriotRoom extends Room<RoomStateSchema> {
     this.clock.setTimeout(() => this.state.crates.delete(crateId), 1500);
   }
 
-  private attemptPickup(player: PlayerSchema, pickup: PickupSchema, pickupId: string) {
+  private attemptPickup(player: PlayerSchema, pickup: PickupSchema, pickupId: string, client?: Client) {
     switch (pickup.type) {
       case "test":
         console.log(`[Room ${this.state.code}] ${player.name} picked up TEST pickup ${pickupId}`);
@@ -441,6 +444,17 @@ export class PatriotRoom extends Room<RoomStateSchema> {
       case "weapon_mg":
       case "weapon_bazooka": {
         const weaponId = pickup.type.replace("weapon_", "") as WeaponId;
+
+        // Rank check
+        if (!canUseWeapon(player.rank as RankId, weaponId)) {
+          client?.send("pickupBlocked", {
+            pickupId: pickup.id,
+            reason: "rank",
+            requiredRank: getRankRequiredForWeapon(weaponId)?.name || "Unknown",
+          });
+          return;
+        }
+
         if (weaponId === "grenade") {
           if (player.grenadeCount >= MAX_GRENADES) return; // Full — grenade stays
           player.grenadeCount = Math.min(MAX_GRENADES, player.grenadeCount + 3);

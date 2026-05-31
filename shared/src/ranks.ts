@@ -1,3 +1,6 @@
+import { WEAPONS } from "./weapons.js";
+import type { WeaponId } from "./weapons.js";
+
 export type RankId = "soldier" | "officer" | "major" | "general" | "marshal";
 
 export interface RankDef {
@@ -42,4 +45,18 @@ export function getKillsToNextRank(kills: number, currentRankId: RankId): number
   const next = getNextRank(currentRankId);
   if (!next) return 0;
   return Math.max(0, next.killThreshold - kills);
+}
+
+export function canUseWeapon(playerRank: RankId, weaponId: WeaponId): boolean {
+  const playerRankIdx = RANKS.findIndex((r) => r.id === playerRank);
+  const weaponDef = WEAPONS[weaponId];
+  if (!weaponDef) return false;
+  const requiredRankIdx = weaponDef.rankRequired - 1;
+  return playerRankIdx >= requiredRankIdx;
+}
+
+export function getRankRequiredForWeapon(weaponId: WeaponId): RankDef | null {
+  const def = WEAPONS[weaponId];
+  if (!def) return null;
+  return RANKS[def.rankRequired - 1] || null;
 }
