@@ -44,3 +44,6 @@ export const REVIVE_RESULT_HP = 50;
 export const BARREL_EXPLOSION_RADIUS = 150;
 export const BARREL_HITBOX_RADIUS = 24;
 export const BARREL_CHAIN_DELAY_MS = 100;
+export const BARREL_CARRY_SPEED_MULT = 0.7;
+export const BARREL_CARRY_OFFSET_Y = -30;
+export const BARREL_PICKUP_RANGE = 50;

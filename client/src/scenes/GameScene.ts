@@ -25,7 +25,7 @@ import { Pickup } from "../entities/Pickup.js";
 import { Explosion } from "../effects/Explosion.js";
 import { getStateCallbacks } from "colyseus.js";
 import { PickupPromptUI } from "../ui/PickupPromptUI.js";
-import { PICKUP_INTERACT_RANGE, canUseWeapon, REVIVE_RANGE } from "@patriot/shared";
+import { PICKUP_INTERACT_RANGE, canUseWeapon, REVIVE_RANGE, BARREL_PICKUP_RANGE, BARREL_CARRY_OFFSET_Y } from "@patriot/shared";
 import type { RankId, WeaponId } from "@patriot/shared";
 
 const FREE_CAM_SPEED = 600;
@@ -79,6 +79,8 @@ export class GameScene extends Phaser.Scene {
   // Barrels
   private barrelEntities = new Map<string, Barrel>();
   private showAoEDebug = false;
+  private barrelCarryHud: HTMLElement | null = null;
+  private barrelPromptEl: HTMLElement | null = null;
 
   constructor() {
     super("GameScene");
@@ -297,6 +299,10 @@ export class GameScene extends Phaser.Scene {
       this.crateEntities.clear();
       this.barrelEntities.forEach((b) => b.destroy());
       this.barrelEntities.clear();
+      this.barrelCarryHud?.remove();
+      this.barrelCarryHud = null;
+      this.barrelPromptEl?.remove();
+      this.barrelPromptEl = null;
       this.pickupEntities.forEach((p) => p.destroy());
       this.pickupEntities.clear();
       this.pickupPrompt.hide();
@@ -629,12 +635,42 @@ export class GameScene extends Phaser.Scene {
       if (ent) { ent.destroy(); this.barrelEntities.delete(id); }
     });
 
-    // Barrel state updates (exploded flag)
+    // Barrel state updates (exploded flag + carried state + position)
     room.onStateChange(() => {
       (room.state as any).barrels?.forEach((b: any, id: string) => {
         const ent = this.barrelEntities.get(id);
-        if (ent && !ent.exploded && b.exploded) ent.setExploded();
+        if (!ent) return;
+        if (!ent.exploded && b.exploded) ent.setExploded();
+        ent.setCarried(b.carriedBy || "");
+
+        if (b.carriedBy) {
+          // For carried barrels, track carrier's interpolated position for smoothness
+          const carrierPlayer = b.carriedBy === this.sessionId
+            ? this.localPlayer
+            : this.remotePlayers.get(b.carriedBy);
+          if (carrierPlayer) {
+            ent.setPosition(carrierPlayer.sprite.x, carrierPlayer.sprite.y + BARREL_CARRY_OFFSET_Y);
+          } else {
+            ent.setPosition(b.x, b.y);
+          }
+        } else if (!ent.exploded) {
+          ent.setPosition(b.x, b.y);
+        }
       });
+    });
+
+    // Barrel picked up / dropped events
+    room.onMessage("barrelPickedUp", (data: any) => {
+      if (data.playerId === this.sessionId) {
+        this.showBarrelCarryHud();
+      }
+    });
+    room.onMessage("barrelDropped", (data: any) => {
+      const ent = this.barrelEntities.get(data.barrelId);
+      if (ent) ent.playDrop();
+      if (data.playerId === this.sessionId) {
+        this.hideBarrelCarryHud();
+      }
     });
 
     // --- Explosion event ---
@@ -971,6 +1007,10 @@ export class GameScene extends Phaser.Scene {
     this.pickupEntities.forEach((pk) => pk.update(delta));
     this.updatePickupPrompt();
     this.updateReviveUI();
+
+    // Update barrel bob animation (for carried barrels)
+    this.barrelEntities.forEach((b) => b.update(delta));
+    this.updateBarrelPrompt();
   }
 
   private toggleGrid() {
@@ -1362,6 +1402,91 @@ export class GameScene extends Phaser.Scene {
       el.style.opacity = "0";
       setTimeout(() => el.remove(), 500);
     }, 2000);
+  }
+
+  private showBarrelCarryHud() {
+    if (this.barrelCarryHud) return;
+    const el = document.createElement("div");
+    el.id = "barrel-carry-hud";
+    el.style.cssText = `
+      position:fixed; bottom:80px; left:50%; transform:translateX(-50%);
+      background:rgba(0,0,0,0.85); border:2px solid #cc4422; border-radius:6px;
+      padding:6px 16px; color:#ff6644; font-family:monospace; font-size:13px;
+      z-index:1000; pointer-events:none; white-space:nowrap;
+    `;
+    el.textContent = "\uD83D\uDEE2\uFE0F Carrying Barrel \u2014 Press E to drop";
+    document.body.appendChild(el);
+    this.barrelCarryHud = el;
+  }
+
+  private hideBarrelCarryHud() {
+    this.barrelCarryHud?.remove();
+    this.barrelCarryHud = null;
+  }
+
+  private updateBarrelPrompt() {
+    if (!this.localPlayer || this.matchEnded) {
+      this.hideBarrelPrompt();
+      return;
+    }
+
+    const room = this.networkManager?.getRoom();
+    if (!room) { this.hideBarrelPrompt(); return; }
+
+    const localState = (room.state as any).players?.get(this.sessionId);
+    if (!localState || localState.isDowned || localState.isDead) { this.hideBarrelPrompt(); return; }
+
+    // If carrying, HUD already shows drop prompt — hide barrel pickup prompt
+    if (localState.carriedBarrelId) {
+      this.hideBarrelPrompt();
+      return;
+    }
+
+    // Find nearest non-carried barrel within pickup range
+    let closestDist = BARREL_PICKUP_RANGE;
+    let closestBarrel: any = null;
+    (room.state as any).barrels?.forEach((b: any) => {
+      if (b.exploded || b.carriedBy) return;
+      const dx = this.localPlayer!.sprite.x - b.x;
+      const dy = this.localPlayer!.sprite.y - b.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < closestDist) {
+        closestDist = dist;
+        closestBarrel = b;
+      }
+    });
+
+    if (closestBarrel) {
+      const cam = this.cameras.main;
+      const sx = (closestBarrel.x - cam.scrollX) * cam.zoom;
+      const sy = (closestBarrel.y - cam.scrollY) * cam.zoom;
+      this.showBarrelPrompt(sx, sy);
+    } else {
+      this.hideBarrelPrompt();
+    }
+  }
+
+  private showBarrelPrompt(sx: number, sy: number) {
+    if (!this.barrelPromptEl) {
+      const el = document.createElement("div");
+      el.id = "barrel-prompt";
+      el.style.cssText = `
+        position:fixed; transform:translateX(-50%);
+        background:rgba(0,0,0,0.85); border:2px solid #cc4422; border-radius:6px;
+        padding:4px 12px; color:#ff6644; font-family:monospace; font-size:11px;
+        z-index:1000; pointer-events:none; white-space:nowrap;
+      `;
+      el.textContent = "Press E to pick up Barrel";
+      document.body.appendChild(el);
+      this.barrelPromptEl = el;
+    }
+    this.barrelPromptEl.style.left = `${sx}px`;
+    this.barrelPromptEl.style.top = `${sy - 50}px`;
+  }
+
+  private hideBarrelPrompt() {
+    this.barrelPromptEl?.remove();
+    this.barrelPromptEl = null;
   }
 
   private updateReviveUI() {

@@ -29,6 +29,9 @@ import {
   REVIVE_RESULT_HP,
   BARREL_HITBOX_RADIUS,
   BARREL_EXPLOSION_RADIUS,
+  BARREL_PICKUP_RANGE,
+  BARREL_CARRY_SPEED_MULT,
+  BARREL_CARRY_OFFSET_Y,
 } from "@patriot/shared";
 import type { RankId } from "@patriot/shared";
 import type { InputCommand, WeaponId, DamageSource, MatchResult } from "@patriot/shared";
@@ -133,7 +136,7 @@ export class PatriotRoom extends Room<RoomStateSchema> {
       }
     });
 
-    // Interact handler — prioritizes revive over pickup
+    // Interact handler — priority: 1. Revive  2. Barrel carry/drop  3. Loot pickup
     this.onMessage("interact", (client) => {
       if (this.state.matchState !== "in_progress") return;
       const player = this.state.players.get(client.sessionId);
@@ -149,7 +152,27 @@ export class PatriotRoom extends Room<RoomStateSchema> {
       });
       if (nearestDowned) return; // Revive handled by interactHeld flow
 
-      // 2. Try pickup
+      // 2. Drop carried barrel (if any)
+      if (player.carriedBarrelId) {
+        this.dropBarrel(player, client.sessionId);
+        return;
+      }
+
+      // 3. Pick up nearby barrel
+      let nearestBarrel: BarrelSchema | null = null;
+      let nearestBarrelId = "";
+      let nearestBarrelDist = BARREL_PICKUP_RANGE;
+      this.state.barrels.forEach((b, bId) => {
+        if (b.exploded || b.carriedBy) return;
+        const d = Math.hypot(b.x - player.x, b.y - player.y);
+        if (d < nearestBarrelDist) { nearestBarrel = b; nearestBarrelId = bId; nearestBarrelDist = d; }
+      });
+      if (nearestBarrel) {
+        this.pickupBarrel(player, client.sessionId, nearestBarrel);
+        return;
+      }
+
+      // 4. Try loot pickup
       let nearest: PickupSchema | null = null;
       let nearestDist = PICKUP_INTERACT_RANGE;
       let nearestId = "";
@@ -253,6 +276,20 @@ export class PatriotRoom extends Room<RoomStateSchema> {
         player.lastProcessedInput = input.sequence;
       }
       inputs.length = 0;
+    });
+
+    // Update carried barrel positions
+    this.state.barrels.forEach((b) => {
+      if (b.carriedBy) {
+        const carrier = this.state.players.get(b.carriedBy);
+        if (carrier && !carrier.isDead) {
+          b.x = carrier.x;
+          b.y = carrier.y + BARREL_CARRY_OFFSET_Y / 2;
+        } else {
+          // Carrier disconnected or dead — drop barrel
+          b.carriedBy = "";
+        }
+      }
     });
 
     // Simulate bullets
@@ -501,6 +538,13 @@ export class PatriotRoom extends Room<RoomStateSchema> {
     if (!barrel || barrel.exploded) return;
     barrel.exploded = true;
 
+    // If carried, detach from carrier
+    if (barrel.carriedBy) {
+      const carrier = this.state.players.get(barrel.carriedBy);
+      if (carrier) carrier.carriedBarrelId = "";
+      barrel.carriedBy = "";
+    }
+
     this.broadcast("explosion", {
       x: barrel.x,
       y: barrel.y,
@@ -523,6 +567,24 @@ export class PatriotRoom extends Room<RoomStateSchema> {
 
     // Remove barrel from state after a short delay (let chain trigger)
     this.clock.setTimeout(() => this.state.barrels.delete(barrelId), 200);
+  }
+
+  private pickupBarrel(player: PlayerSchema, sessionId: string, barrel: BarrelSchema) {
+    barrel.carriedBy = sessionId;
+    player.carriedBarrelId = barrel.id;
+    this.broadcast("barrelPickedUp", { playerId: sessionId, barrelId: barrel.id });
+  }
+
+  private dropBarrel(player: PlayerSchema, sessionId: string) {
+    const barrel = this.state.barrels.get(player.carriedBarrelId);
+    if (barrel) {
+      barrel.carriedBy = "";
+      barrel.x = player.x;
+      barrel.y = player.y;
+    }
+    const barrelId = player.carriedBarrelId;
+    player.carriedBarrelId = "";
+    this.broadcast("barrelDropped", { playerId: sessionId, barrelId });
   }
 
   private attackerFactionOf(attackerId: string): "player" | "ai" {
@@ -556,6 +618,9 @@ export class PatriotRoom extends Room<RoomStateSchema> {
   }
 
   private downPlayer(p: PlayerSchema, id: string, attackerId: string) {
+    // Drop carried barrel before going down
+    if (p.carriedBarrelId) this.dropBarrel(p, id);
+
     p.isDowned = true;
     p.hp = 0;
     p.downedAt = Date.now();
@@ -749,8 +814,9 @@ export class PatriotRoom extends Room<RoomStateSchema> {
     });
 
     // Respawn fully-dead players at this checkpoint
-    this.state.players.forEach((p) => {
+    this.state.players.forEach((p, pid) => {
       if (p.isDead) {
+        if (p.carriedBarrelId) this.dropBarrel(p, pid);
         p.isDead = false;
         p.isDowned = false;
         p.hp = 100;
@@ -919,7 +985,9 @@ export class PatriotRoom extends Room<RoomStateSchema> {
       my /= mag;
     }
 
-    const step = PLAYER_RUN_SPEED * (dt / 1000);
+    let speed = PLAYER_RUN_SPEED;
+    if (player.carriedBarrelId) speed *= BARREL_CARRY_SPEED_MULT;
+    const step = speed * (dt / 1000);
 
     // Try X movement
     const newX = player.x + mx * step;
@@ -1022,6 +1090,10 @@ export class PatriotRoom extends Room<RoomStateSchema> {
     } catch {
       // Reconnection failed or consented leave
     }
+
+    // Drop carried barrel before removing player
+    const leavingPlayer = this.state.players.get(client.sessionId);
+    if (leavingPlayer?.carriedBarrelId) this.dropBarrel(leavingPlayer, client.sessionId);
 
     const wasCreator = client.sessionId === this.state.creatorId;
     this.state.players.delete(client.sessionId);
