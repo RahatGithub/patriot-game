@@ -1,78 +1,50 @@
 import type { Screen, ScreenContext } from "../ScreenManager.js";
-import { InputManager } from "../../input/InputManager.js";
-import { InputDebugOverlay } from "../InputDebugOverlay.js";
-import { getDebugFlag } from "../../utils/settings.js";
 
 export class MatchStartingScreen implements Screen {
-  private inputManager: InputManager | null = null;
-  private debugOverlay: InputDebugOverlay | null = null;
-  private f3Handler: ((e: KeyboardEvent) => void) | null = null;
+  private readyHandler: (() => void) | null = null;
+  private game: Phaser.Game | null = null;
 
   render(ctx: ScreenContext): HTMLElement {
     const { screens } = ctx;
+    const game = screens.game;
+    this.game = game;
 
     const el = document.createElement("div");
     el.className = "screen";
-    // Allow pointer events to pass through to Phaser canvas for input testing
-    el.style.pointerEvents = "none";
     el.innerHTML = `
       <div class="card" style="text-align:center">
-        <h2>Match Starting...</h2>
+        <h2>Loading map...</h2>
         <div class="spinner"></div>
-        <p class="subtitle">Get ready!</p>
+        <p class="subtitle">Preparing battlefield</p>
       </div>
     `;
 
-    // Initialize input system
-    const game = screens.game;
-    const profile = screens.deviceProfile;
-    if (game && profile) {
-      const scene = game.scene.getScene("BootScene");
-      if (scene) {
-        this.inputManager = new InputManager();
-        this.inputManager.init(scene, profile);
+    if (game) {
+      const profile = screens.deviceProfile;
 
-        // Debug overlay (via URL ?debug=input or F3 toggle)
-        if (getDebugFlag("input")) {
-          this.showDebug();
-        }
+      // Listen for game scene ready
+      this.readyHandler = () => {
+        // Hide the HTML overlay — reveals the game canvas
+        screens.hide();
+        // Launch HUD scene in parallel
+        game.scene.start("HUDScene");
+      };
+      game.events.once("gameSceneReady", this.readyHandler);
 
-        this.f3Handler = (e: KeyboardEvent) => {
-          if (e.key === "F3") {
-            e.preventDefault();
-            this.toggleDebug();
-          }
-        };
-        window.addEventListener("keydown", this.f3Handler);
-      }
+      // Start GameScene (replaces BootScene)
+      setTimeout(() => {
+        game.scene.start("GameScene", { deviceProfile: profile });
+      }, 100);
     }
 
     return el;
   }
 
-  private showDebug() {
-    if (!this.debugOverlay && this.inputManager) {
-      this.debugOverlay = new InputDebugOverlay(this.inputManager);
-    }
-  }
-
-  private toggleDebug() {
-    if (this.debugOverlay) {
-      this.debugOverlay.destroy();
-      this.debugOverlay = null;
-    } else {
-      this.showDebug();
-    }
-  }
-
   dispose() {
-    this.debugOverlay?.destroy();
-    this.debugOverlay = null;
-    this.inputManager?.destroy();
-    this.inputManager = null;
-    if (this.f3Handler) {
-      window.removeEventListener("keydown", this.f3Handler);
-      this.f3Handler = null;
+    if (this.readyHandler && this.game) {
+      this.game.events.off("gameSceneReady", this.readyHandler);
+      this.readyHandler = null;
     }
+    this.game = null;
   }
 }
