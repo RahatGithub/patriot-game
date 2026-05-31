@@ -46,8 +46,8 @@ game.events.on("leaveMatch", () => {
 });
 
 // Match ended handler: show end screen overlay
-game.events.on("matchEnded", (data: { result: string }) => {
-  screens.show("matchEnd", { result: data.result });
+game.events.on("matchEnded", (data: { result: string; finalStats?: any }) => {
+  screens.show("matchEnd", { result: data.result, finalStats: data.finalStats });
 });
 
 // Check URL for room code deep link

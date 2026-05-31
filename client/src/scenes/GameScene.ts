@@ -507,20 +507,24 @@ export class GameScene extends Phaser.Scene {
 
     // Checkpoint captured event
     room.onMessage("checkpointCaptured", (data: any) => {
-      const { checkpointId, order } = data;
+      const { checkpointId, order, stats } = data;
 
       // Trigger flag color transition
       this.checkpointFlags.get(checkpointId)?.capture();
       this.capturedSet.add(checkpointId);
 
-      // Celebration overlay
+      // Stats overlay + celebration
       this.showCaptureNotification(order);
+      if (stats) this.showMidMatchStats(order, stats);
     });
 
     // Match ended
     room.onMessage("MATCH_ENDED", (data: any) => {
       this.matchEnded = true;
-      this.game.events.emit("matchEnded", { result: data.result });
+      this.game.events.emit("matchEnded", {
+        result: data.result,
+        finalStats: data.finalStats,
+      });
     });
 
     // Wave detection: watch totalAISpawned changes for wave announcements
@@ -882,6 +886,76 @@ export class GameScene extends Phaser.Scene {
       delay: 1500,
       duration: 500,
       onComplete: () => this.respawnNotification?.setVisible(false),
+    });
+  }
+
+  private showMidMatchStats(order: number, stats: any) {
+    // Remove existing overlay if present
+    const existing = document.getElementById("midmatch-stats");
+    if (existing) existing.remove();
+
+    const totalMs = stats.timeRemainingMs ?? 0;
+    const totalSec = Math.ceil(totalMs / 1000);
+    const min = Math.floor(totalSec / 60);
+    const sec = totalSec % 60;
+    const timeStr = `${String(min).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+
+    const players = (stats.players || []) as any[];
+    const sorted = [...players].sort((a: any, b: any) => b.kills - a.kills || b.damageDealt - a.damageDealt);
+    const mvpName = sorted.length > 0 ? sorted[0].name : "";
+
+    let rows = "";
+    for (const p of sorted) {
+      const isMvp = p.name === mvpName && p.kills > 0;
+      const crown = isMvp ? "\uD83D\uDC51 " : "";
+      const style = isMvp ? 'style="color:#ffd700"' : "";
+      rows += `<div class="midstats-row" ${style}>${crown}${p.name} — ${p.kills} kills</div>`;
+    }
+
+    const overlay = document.createElement("div");
+    overlay.id = "midmatch-stats";
+    overlay.innerHTML = `
+      <div style="
+        position:fixed; top:70px; left:50%; transform:translateX(-50%);
+        background:rgba(0,0,0,0.85); border:1px solid #555; border-radius:8px;
+        padding:14px 24px; color:#fff; font-family:monospace; z-index:1000;
+        min-width:280px; max-width:420px; text-align:center;
+        animation: fadeInStats 0.4s ease-out;
+      ">
+        <div style="font-size:11px; color:#aaa; margin-bottom:4px">
+          Progress: ${stats.capturedSoFar}/${stats.totalCheckpoints} &nbsp;|&nbsp; Time left: ${timeStr}
+        </div>
+        <div style="border-top:1px solid #444; margin:8px 0; padding-top:8px; text-align:left; font-size:13px; line-height:1.6">
+          ${rows}
+        </div>
+      </div>
+    `;
+
+    // Inject keyframes if not present
+    if (!document.getElementById("midstats-style")) {
+      const style = document.createElement("style");
+      style.id = "midstats-style";
+      style.textContent = `
+        @keyframes fadeInStats { from { opacity:0; transform:translateX(-50%) translateY(-10px); } to { opacity:1; transform:translateX(-50%) translateY(0); } }
+        .midstats-row { padding: 2px 0; }
+      `;
+      document.head.appendChild(style);
+    }
+
+    document.body.appendChild(overlay);
+
+    // Auto-dismiss after 5s
+    setTimeout(() => {
+      overlay.style.transition = "opacity 0.5s";
+      overlay.style.opacity = "0";
+      setTimeout(() => overlay.remove(), 500);
+    }, 5000);
+
+    // Click to dismiss
+    overlay.addEventListener("click", () => {
+      overlay.style.transition = "opacity 0.3s";
+      overlay.style.opacity = "0";
+      setTimeout(() => overlay.remove(), 300);
     });
   }
 

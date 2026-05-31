@@ -98,6 +98,7 @@ export class PatriotRoom extends Room<RoomStateSchema> {
 
       this.state.bullets.set(bullet.id, bullet);
       player.lastFireTimestamp = now;
+      player.shotsFired++;
 
       // Alert nearby AI via sound
       this.aiManager.broadcastSound(player.x, player.y);
@@ -325,11 +326,69 @@ export class PatriotRoom extends Room<RoomStateSchema> {
     console.log(`[Room ${this.state.code}] Initialized ${count} checkpoints`);
   }
 
+  private snapshotStats() {
+    const players: any[] = [];
+    this.state.players.forEach((p) => {
+      players.push({
+        name: p.name,
+        rank: p.rank,
+        kills: p.kills,
+        deaths: p.deaths,
+        damageDealt: p.damageDealt,
+        checkpointsCaptured: p.checkpointsCaptured,
+      });
+    });
+    return {
+      capturedSoFar: this.state.capturedCount,
+      totalCheckpoints: this.state.checkpointCount,
+      timeRemainingMs: this.state.timeRemainingMs,
+      players,
+    };
+  }
+
+  private snapshotFullStats() {
+    const players: any[] = [];
+    this.state.players.forEach((p) => {
+      players.push({
+        id: p.id,
+        name: p.name,
+        isCreator: p.isCreator,
+        rank: p.rank,
+        kills: p.kills,
+        deaths: p.deaths,
+        damageDealt: p.damageDealt,
+        damageTaken: p.damageTaken,
+        shotsFired: p.shotsFired,
+        shotsHit: p.shotsHit,
+        checkpointsCaptured: p.checkpointsCaptured,
+        revives: p.revives,
+      });
+    });
+
+    return {
+      result: this.state.matchResult,
+      matchDurationMs: Date.now() - this.state.matchStartedAt,
+      capturedCount: this.state.capturedCount,
+      totalCheckpoints: this.state.checkpointCount,
+      totalAISpawned: this.state.totalAISpawned,
+      totalAIKilled: this.state.totalAIKilled,
+      players: players.sort((a, b) => b.kills - a.kills || b.damageDealt - a.damageDealt),
+    };
+  }
+
   private onCheckpointCaptured(cp: CheckpointSchema) {
+    // Track checkpointsCaptured for players who were in the zone
+    const capIds = cp.capturingPlayerIds.split(",").filter(Boolean);
+    for (const pid of capIds) {
+      const p = this.state.players.get(pid);
+      if (p) p.checkpointsCaptured++;
+    }
+
     this.broadcast("checkpointCaptured", {
       checkpointId: cp.id,
       order: cp.order,
       capturedAt: cp.capturedAt,
+      stats: this.snapshotStats(),
     });
 
     // Respawn fully-dead players at this checkpoint
@@ -356,6 +415,7 @@ export class PatriotRoom extends Room<RoomStateSchema> {
     this.broadcast("MATCH_ENDED", {
       result,
       timeRemainingMs: this.state.timeRemainingMs,
+      finalStats: this.snapshotFullStats(),
     });
 
     // Stop AI
@@ -393,6 +453,12 @@ export class PatriotRoom extends Room<RoomStateSchema> {
     const dmg = wep ? getDamage(wep.damageSource, "player") : 5;
     ai.hp = Math.max(0, ai.hp - dmg);
 
+    const attacker = this.state.players.get(bullet.ownerId);
+    if (attacker) {
+      attacker.shotsHit++;
+      attacker.damageDealt += dmg;
+    }
+
     this.broadcast("damage", {
       targetId: aiId,
       attackerId: bullet.ownerId,
@@ -424,6 +490,7 @@ export class PatriotRoom extends Room<RoomStateSchema> {
     const wep = WEAPONS[bullet.weaponId as WeaponId];
     const dmg = wep ? getDamage(wep.damageSource, "player") : 5;
     target.hp = Math.max(0, target.hp - dmg);
+    target.damageTaken += dmg;
 
     this.broadcast("damage", {
       targetId,

@@ -26,4 +26,10 @@ export class PlayerSchema extends Schema {
   @type("string") downedBy: string = "";
   @type("number") kills: number = 0;
   @type("number") deaths: number = 0;
+  @type("number") shotsFired: number = 0;
+  @type("number") shotsHit: number = 0;
+  @type("number") damageDealt: number = 0;
+  @type("number") damageTaken: number = 0;
+  @type("number") checkpointsCaptured: number = 0;
+  @type("number") revives: number = 0;
 }
